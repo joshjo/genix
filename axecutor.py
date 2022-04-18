@@ -1,10 +1,15 @@
+from copy import copy
+import os, errno
+from collections import defaultdict
+from random import randint, random, shuffle
+import numpy as np
 import queries
+import math
 import shutil
 import sqlite3
 import time
 import uuid
 import multiprocessing as mp
-from dataclasses import dataclass
 
 
 all_queries = [
@@ -39,23 +44,67 @@ all_queries = [
 
 # def get_tables(connection):
 
-class Index:
-    def __init__(self, table, columns):
+
+def silentremove(filename):
+    try:
+        os.remove(filename)
+    except OSError as e: # this would be "except OSError, e:" before Python 2.6
+        if e.errno != errno.ENOENT: # errno.ENOENT = no such file or directory
+            raise # re-raise exception if a different error occurred
+
+
+class BaseGen:
+    def __init__(self, index_defs):
         self.process_id = str(uuid.uuid4())[:8]
-        self.table = table
-        self.columns = columns
+        self.index_defs = index_defs
+        self.gen = [0 for _ in index_defs]
+        self.is_elite = False
 
-    @property
-    def name(self):
-        column_names = '__'.join(self.columns)
-        return f"idx_{self.table}__{column_names}".lower()
+    def prepare_queries(self):
+        indexes = [v for k, v in zip(self.gen, self.index_defs) if k]
+        table_columns = defaultdict(list)
+        for k, v in indexes:
+            table_columns[k].append(v)
+        queries = []
+        for table, columns in table_columns.items():
+            str_columns = ", ".join(columns)
+            index_name = "__".join(columns)
+            index_name = f"{table}__{index_name}"
+            queries.append(
+                f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({str_columns});"
+            )
 
-    def __repr__(self) -> str:
-        return self.name
+        return queries
+
+    def mutate(self):
+        rindex = randint(0, len(self.gen) - 1)
+        self.gen[rindex] = 0 if self.gen[rindex] else 1
+
+    def crossover(self, other):
+        rindex = randint(0, len(self.gen) - 2)
+        self.gen[:rindex], other.gen[:rindex] = other.gen[:rindex], self.gen[:rindex]
+
+    def leveling(self, ratio=0.5):
+        for i in range(len(self.gen)):
+            if self.gen[i] == 1 and random() < 0.5:
+                self.gen[i] = 0
 
 
-def create_indexes(table_name, columns):
-    return [Index(table_name, [column]) for column in columns]
+
+class RandomGen(BaseGen):
+    def __init__(self, index_defs, ratio=0.5):
+        super().__init__(index_defs)
+        self.gen = [randint(0, 1) * randint(0, 1) for _ in index_defs]
+        # for i, _ in enumerate(index_defs):
+        #     if random() > ratio:
+        #         self.gen[i] = 1
+
+
+class PositionGen(BaseGen):
+    def __init__(self, index_defs, index=0):
+        super().__init__(index_defs)
+        lindex = index if len(index_defs) > index else 0
+        self.gen[lindex] = 1
 
 
 def get_defs(db_name):
@@ -67,20 +116,17 @@ def get_defs(db_name):
     for table_name in table_names:
         query_columns = f"SELECT name FROM PRAGMA_TABLE_INFO('{table_name}');"
         cursor = file_db.execute(query_columns)
-        cols = [row[0] for row in cursor.fetchall()]
-        result += create_indexes(table_name, cols)
-
+        result += [(table_name, row[0]) for row in cursor.fetchall()]
     file_db.close()
 
     return result
 
 
-def get_mem_db_name(index_def):
-    return f'/dev/shm/db_{index_def.process_id}.db'
+def copy_db(src, dst):
+    path_dst = f'/dev/shm/db_{dst}.db'
+    shutil.copyfile(src, path_dst)
 
-
-def copy_db(src, index_def):
-    shutil.copyfile(src, get_mem_db_name(index_def))
+    return path_dst
 
 
 def prepare_query_index(index_def):
@@ -88,39 +134,110 @@ def prepare_query_index(index_def):
     query = f"CREATE INDEX IF NOT EXISTS {index_def.name} ON {index_def.table}({column_names});"
     return query
 
-def run_index(db_name, index_def):
-    copy_db(db_name, index_def)
-    mem_dbname = get_mem_db_name(index_def)
+
+def run_index(db_name, elem):
+    mem_dbname = copy_db(db_name, elem.process_id)
     mem_db = sqlite3.connect(mem_dbname)
     cursor = mem_db.cursor()
-    # query_index = prepare_query_index(index_def)
-    # cursor.execute(query_index)
+    queries = elem.prepare_queries()
+    for query in queries:
+        cursor.execute(query)
 
     total_time = 0
 
     for query_number, query in all_queries:
-        s = time.time()
+        s = time.perf_counter()
         cursor.execute(query)
         cursor.fetchone()
-        e = time.time()
+        e = time.perf_counter()
         local_time = e - s
         total_time += local_time
-        print(f"{query_number},{local_time}")
-    print(f"{index_def.process_id},{index_def.name},{total_time}")
+        # print(f"\t{elem.process_id},{local_time}")
     mem_db.close()
+    silentremove(mem_dbname)
+    # print(f"{elem.process_id},{total_time},{len(queries)}")
+    return (elem.process_id, total_time)
+
+
+def get_top_indexes(population, n=1):
+    # population
+    i_population = list(enumerate(population.copy()))
+    i_population.sort(key=lambda a: a[1][1])
+
+    return [k for k, _ in i_population][:n]
 
 
 def main():
-    defs = get_defs("TPC-H-small.db")
-    # run_index("TPC-H-small.db", defs[10])
-    # pool = mp.Pool(2)
-    # pool.starmap(run_index, [("TPC-H-small.db", "p1", ), ("TPC-H-small.db", "p2", )])
+    db_src = "dbs/TPC-H-small.db"
+    defs = get_defs(db_src)
+    cpu_count = mp.cpu_count()
+    # It is important to have the number of population based in the number of cpu
+    # in order to have proportional execution times.
+    len_population = int(math.ceil(len(defs) / cpu_count) * cpu_count)
+    population = [PositionGen(defs, i) for i in range(len_population)]
+    # population = [RandomGen(defs, 0.2) for i in range(len_population)]
+    epochs = 30
 
-    pool = mp.Pool()
-    for index_def in defs[-1:]:
-        pool.apply_async(run_index, args=("TPC-H-small.db", index_def))
-    pool.close()
-    pool.join()
+    for i in range(epochs):
+
+        profiles = []
+        def callback(r):
+            profiles.append(r)
+        pool = mp.Pool(6)
+        for elem in population:
+            pool.apply_async(run_index, args=(db_src, elem), callback=callback)
+        pool.close()
+        pool.join()
+
+        print(min(profiles, key=lambda x: x[1]))
+
+        indexes = get_top_indexes(profiles, n=3)
+        epoch_population = [copy(population[i]) for i in indexes]
+        for elem in epoch_population:
+            elem.is_elite = True
+
+        while len(epoch_population) < len_population:
+            rindex = randint(0, len_population - 1)
+            new_elem = copy(population[rindex])
+            new_elem.is_elite = False
+            epoch_population.append(new_elem)
+
+        shuffle(epoch_population)
+
+        for elem in epoch_population:
+            if elem.is_elite:
+                continue
+            if random() < 0.7:
+                elem.mutate()
+            if random() < 0.2:
+                rindex = randint(0, len_population - 1)
+                elem.crossover(epoch_population[rindex])
+            if random() < 0.3:
+                elem.leveling()
+
+        population = epoch_population
+
+    # last_profiles = []
+    # def callback(r):
+    #     last_profiles.append(r)
+    # pool = mp.Pool(6)
+    # for elem in population:
+    #     pool.apply_async(run_index, args=(db_src, elem), callback=callback)
+    # pool.close()
+    # pool.join()
+
+    # print(np.mean([prof[1] for prof in profiles]))
+
+    # for elem in population:
+    #     print(elem.gen)
+
+
+
+    # print(run_index(db_src, population[0]))
+
+
+    # print(results)
+    # print("-->", get_top_indexes(results))
 
 
 if __name__ == '__main__':
