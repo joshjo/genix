@@ -1,6 +1,6 @@
 # Evoindexing
 
-Get best indexes by using eovlutionary algorithms.
+A database indexing by using eovlutionary algorithms.
 
 
 ## Install
@@ -9,15 +9,17 @@ Get best indexes by using eovlutionary algorithms.
 - Generate a 0.1 version of TPC-H DB with: `SCALE_FACTOR=0.1 make`
 
 
-## TODO:
+## Model
 
-- Get all column from all the tables as an bitarray:
+### Genotype
 
-This means that position 1 and 6 are turn on:
+Array of 0s and 1s where each position represents if the index is active or not
 
-[0, 1, 0, 0, 0, 0, 1].
+### Phenotype
 
-This will produce a list of single o composite index queries.
 
-- Get the size of the active indexes.
-
+```
+CREATE INDEX IF NOT EXISTS PARTSUPP__PS_SUPPLYCOST ON PARTSUPP(PS_SUPPLYCOST);
+CREATE INDEX IF NOT EXISTS CUSTOMER__C_NAME ON CUSTOMER(C_NAME);
+CREATE INDEX IF NOT EXISTS ORDERS__O_CUSTKEY__O_ORDERSTATUS ON ORDERS(O_CUSTKEY, O_ORDERSTATUS);
+```
