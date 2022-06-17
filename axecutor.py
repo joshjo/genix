@@ -1,4 +1,4 @@
-from copy import copy
+from copy import copy, deepcopy
 import os, errno
 from collections import defaultdict
 from random import randint, random, shuffle
@@ -110,6 +110,9 @@ class BaseGen:
         else:
             self.gen[:rindex], other.gen[:rindex] = other.gen[:rindex], self.gen[:rindex]
 
+    def shuffle_gen(self):
+        shuffle(self.gen)
+
     def leveling(self, ratio=0.5):
         for i in range(len(self.gen)):
             if self.gen[i] == ACTIVE and random() < ratio:
@@ -193,7 +196,7 @@ def get_top_n(profiles, n=1):
     return sorted(profiles, key=lambda a: a[1])[:n]
 
 
-def main():
+def test():
     db_src = "dbs/TPC-H-small.db"
     defs = get_defs(db_src)
     cpu_count = mp.cpu_count()
@@ -204,20 +207,24 @@ def main():
     # population = [PositionGen(defs, i % len_defs) for i in range(len_population)]
     population = [RandomGen(defs, 0.075) for _ in range(len_population)]
 
-    # gen1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    # gen2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
-    # gen3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
-    # gen4 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
-    # gen5 = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
-    # gen6 = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    test_gens = [
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+        [1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+        [0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1],
+        [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1],
+        [0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0],
+        [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1],
+        [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1],
+        [0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1],
+        [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    ]
 
-    # elem1 = RandomGen.init_from_gen(defs, gen1)
-    # elem2 = RandomGen.init_from_gen(defs, gen2)
-    # elem3 = RandomGen.init_from_gen(defs, gen3)
-    # elem4 = RandomGen.init_from_gen(defs, gen4)
-    # elem5 = RandomGen.init_from_gen(defs, gen5)
-    # elem6 = RandomGen.init_from_gen(defs, gen6)
-    # population = [elem1, elem2, elem3, elem4, elem5, elem6]
+    population = [
+        RandomGen.init_from_gen(defs, item) for item in test_gens
+    ]
 
     # for i, elem in enumerate(population):
     #     print(elem.process_id, i, elem.is_elite)
@@ -225,7 +232,9 @@ def main():
     #     print("\n".join(elem.get_phenotype()))
     #     print("\n")
 
-    epochs = 10
+    all_elites = []
+
+    epochs = 1
 
     for i in range(epochs):
         len_population = len(population)
@@ -243,12 +252,16 @@ def main():
         pool.join()
         n = math.ceil(len_population * 0.075)
 
+        # print("profiles", profiles)
         top_profiles = get_top_n(profiles, n=n)
 
         # print(profiles)
         # print(top_profiles[0])
         top_profile_1 = top_profiles[0]
         map_population = {elem.process_id: elem for elem in population}
+
+        for k, v in profiles:
+            print(map_population[k].get_gen_str(), v)
 
         # print("indexes", indexes)
         epoch_population = [copy(map_population[process_id]) for process_id, _ in top_profiles]
@@ -258,7 +271,9 @@ def main():
 
         best_elem = map_population[top_profile_1[0]]
 
-        print(best_elem.get_gen_str(), i, top_profile_1)
+        all_elites.append(best_elem)
+
+        # print(best_elem.get_gen_str(), i, top_profile_1)
 
         while len(epoch_population) < len_population:
             rindex = randint(0, len_population - 1)
@@ -305,6 +320,128 @@ def main():
 
         population = epoch_population
 
+
+def main():
+    db_src = "dbs/TPC-H-small.db"
+    defs = get_defs(db_src)
+    cpu_count = mp.cpu_count()
+    # It is important to have the number of population based in the number of cpus
+    # in order to have proportional execution times.
+    len_defs = len(defs)
+    # len_population = int(math.ceil(len_defs / cpu_count) * cpu_count)
+    len_population = 18
+    # population = [PositionGen(defs, i % len_defs) for i in range(len_population)]
+    population = [RandomGen(defs, 0.075) for _ in range(len_population)]
+
+    # for i, elem in enumerate(population):
+    #     print(elem.process_id, i, elem.is_elite)
+    #     print(elem.gen)
+    #     print("\n".join(elem.get_phenotype()))
+    #     print("\n")
+
+    all_elites = []
+
+    epochs = 10
+
+    for i in range(epochs):
+        len_population = len(population)
+        # print("*** iteration:", i + 1)
+
+        profiles = []
+        def callback(r):
+            profiles.append(r)
+        pool = mp.Pool(6)
+        for elem in population:
+            pool.apply_async(run_index, args=(db_src, elem), callback=callback)
+            # profiles.append(run_index(db_src, elem))
+
+        pool.close()
+        pool.join()
+        n_prof = math.ceil(len_population * 0.075)
+
+        # print("profiles", profiles)
+        top_profiles = get_top_n(profiles, n=n_prof)
+
+        # print(profiles)
+        # print(top_profiles[0])
+        top_profile_1 = top_profiles[0]
+        map_population = {elem.process_id: elem for elem in population}
+
+        # for k, v in profiles:
+        #     print(map_population[k].get_gen_str(), v)
+
+        epoch_population = [deepcopy(map_population[process_id]) for process_id, _ in top_profiles]
+
+        for elem in epoch_population:
+            elem.is_elite = True
+
+        best_elem = map_population[top_profile_1[0]]
+
+        all_elites.append(deepcopy(best_elem))
+
+        print(best_elem.gen)
+
+        # for x in population:
+        #     print(x.get_gen_str(), x.process_id, "*" if best_elem.process_id == x.process_id else "")
+        for k, v in profiles:
+            x = map_population[k]
+            print(x.get_gen_str(), x.process_id, "%.3f" % v, "*" if best_elem.process_id == x.process_id else " ")
+
+        print("\n")
+
+        # print(best_elem.get_gen_str(), i, top_profile_1)
+
+        while len(epoch_population) < len_population:
+            rindex = randint(0, len_population - 1)
+            new_elem = copy(population[rindex])
+            new_elem.assign_process_id()
+            new_elem.is_elite = False
+            epoch_population.append(new_elem)
+
+        shuffle(epoch_population)
+
+        # for i, elem in enumerate(epoch_population):
+        #     print(elem.process_id, i, elem.is_elite)
+        #     print(elem.gen)
+        #     print("\n".join(elem.get_phenotype()))
+        #     print("\n")
+
+
+        for elem in epoch_population:
+            if elem.is_elite:
+                rindex = randint(0, len_population - 1)
+                if not epoch_population[rindex].is_elite:
+                    epoch_population[rindex].pick_best(elem)
+            else:
+                if random() < 0.7:
+                # if random() < 1:
+                    elem.mutate()
+                # if random() < 1:
+                if random() < 0.2:
+                    rindex = randint(0, len_population - 1)
+                    elem.crossover(
+                        epoch_population[rindex],
+                        partial=epoch_population[rindex].is_elite
+                    )
+                if random() < 0.05:
+                    elem.shuffle_gen()
+                # if random() < 0.3:
+                #     elem.leveling()
+
+        # print("############# afteeeeer rouletting\n")
+
+        # for i, elem in enumerate(epoch_population):
+        #     print(elem.process_id, i, elem.is_elite)
+        #     print(elem.gen)
+        #     print("\n".join(elem.get_phenotype()))
+        #     print("\n")
+        population = epoch_population
+
+    for i, elem in enumerate(all_elites):
+        print(elem.process_id, i, elem.is_elite)
+        print(elem.gen)
+        print("\n".join(elem.get_phenotype()))
+        print("\n")
 
     # print("\n", "final", "\n")
 
