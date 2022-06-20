@@ -333,15 +333,9 @@ def main():
     # population = [PositionGen(defs, i % len_defs) for i in range(len_population)]
     population = [RandomGen(defs, 0.075) for _ in range(len_population)]
 
-    # for i, elem in enumerate(population):
-    #     print(elem.process_id, i, elem.is_elite)
-    #     print(elem.gen)
-    #     print("\n".join(elem.get_phenotype()))
-    #     print("\n")
-
     all_elites = []
 
-    epochs = 10
+    epochs = 50
 
     for i in range(epochs):
         len_population = len(population)
