@@ -24,6 +24,23 @@ CREATE INDEX IF NOT EXISTS CUSTOMER__C_NAME ON CUSTOMER(C_NAME);
 CREATE INDEX IF NOT EXISTS ORDERS__O_CUSTKEY__O_ORDERSTATUS ON ORDERS(O_CUSTKEY, O_ORDERSTATUS);
 ```
 
+### Query
+
+```
+select * from "dbstat" where name like "index_name";
+```
+
+The returned size is in _bytes_
+
+
+Another value we can use.
+
+```
+select sum(pgsize-unused)*100.0/sum(pgsize) from "dbstat" where name like "index_name";
+```
+
+To see how efficiently the content of a table is stored on disk, compute the amount of space used to hold actual content divided by the total amount of disk space used. The closer this number is to 100%, the more efficient the packing. (In this example, the 'xyz' table is assumed to be in the 'main' schema. Again, there are two different versions that show the use of DBSTAT both without and with the new aggregated feature, respectively.)
+
 
 ### Results
 

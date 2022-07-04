@@ -82,16 +82,22 @@ class BaseGen:
         table_columns = defaultdict(list)
         for k, v in indexes:
             table_columns[k].append(v)
-        queries = []
+        triplets = []
         for table, columns in table_columns.items():
             str_columns = ", ".join(columns)
             index_name = "__".join(columns)
             index_name = f"{table}__{index_name}"
-            queries.append(
-                f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({str_columns});"
-            )
+            triplets.append((index_name, table, str_columns))
 
-        return queries
+        return triplets
+
+    def get_phenotype_queries(self, phenotype=None):
+        if phenotype is None:
+            phenotype = self.get_phenotype()
+        return [
+            f"CREATE INDEX IF NOT EXISTS {indexname} ON {table}({columns});"
+            for indexname, table, columns in phenotype
+        ]
 
     def mutate(self, ratio=0.2):
         """
@@ -162,9 +168,9 @@ def copy_db(src, dst):
     return path_dst
 
 
-def prepare_query_index(index_def):
-    column_names = ', '.join(index_def.columns)
-    query = f"CREATE INDEX IF NOT EXISTS {index_def.name} ON {index_def.table}({column_names});"
+def get_index_size_query(phenotype):
+    names = ", ".join([f"'{x[0]}'" for x in phenotype])
+    query = f"select COALESCE(sum(pgsize), 0) from 'dbstat' where name IN ({names});"
     return query
 
 
@@ -172,11 +178,19 @@ def run_index(db_name, elem):
     mem_dbname = copy_db(db_name, elem.process_id)
     mem_db = sqlite3.connect(mem_dbname)
     cursor = mem_db.cursor()
-    queries = elem.get_phenotype()
+    phenotype = elem.get_phenotype()
+    queries = elem.get_phenotype_queries(phenotype)
+
     for query in queries:
         cursor.execute(query)
 
     total_time = 0
+
+    index_size_query_query = get_index_size_query(phenotype)
+
+    pointer = cursor.execute(index_size_query_query)
+    qq = pointer.fetchone()
+    query_size = qq[0]
 
     for query_number, query in all_queries:
         s = time.perf_counter()
@@ -189,11 +203,45 @@ def run_index(db_name, elem):
     mem_db.close()
     silentremove(mem_dbname)
     # print(f"{elem.process_id},{total_time},{len(queries)}")
-    return (elem.process_id, total_time)
+    return (elem.process_id, total_time, query_size)
 
 
-def get_top_n(profiles, n=1):
-    return sorted(profiles, key=lambda a: a[1])[:n]
+def normalize_rewards(rewards):
+    max_total_time = max(rewards, key= lambda a: a[1])[1]
+    max_query_size = max(rewards, key= lambda a: a[2])[2]
+    return [
+        (
+            i[0],
+            ((i[1] * 0.85) / max_total_time) + ((i[2] * 0.15)/ max_query_size),
+        ) for i in rewards
+    ]
+
+
+def get_top_n(rewards, n=1):
+    return sorted(rewards, key=lambda a: a[1])[:n]
+# def get_top_n(rewards, n=1):
+#     max_total_time = max(rewards, key= lambda a: a[1])[1]
+#     max_query_size = max(rewards, key= lambda a: a[2])[2]
+#     normalized = [
+#         (
+#             i[0],
+#             ((i[1] * 0.85) / max_total_time) + ((i[2] * 0.15)/ max_query_size),
+#         ) for i in rewards
+#     ]
+#     return sorted(normalized, key=lambda a: a[-1])[:n]
+
+
+def single_thread():
+    db_src = "dbs/TPC-H-small.db"
+    defs = get_defs(db_src)
+    test_gens = [
+        RandomGen(defs, 0.075)
+        for i in range(10)
+    ]
+    rewards = []
+    for g in test_gens:
+        rewards.append(run_index(db_src, g))
+    get_top_n(rewards, 2)
 
 
 def test():
@@ -205,7 +253,7 @@ def test():
     len_defs = len(defs)
     len_population = int(math.ceil(len_defs / cpu_count) * cpu_count)
     # population = [PositionGen(defs, i % len_defs) for i in range(len_population)]
-    population = [RandomGen(defs, 0.075) for _ in range(len_population)]
+    # population = [RandomGen(defs, 0.075) for _ in range(len_population)]
 
     test_gens = [
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -229,7 +277,7 @@ def test():
     # for i, elem in enumerate(population):
     #     print(elem.process_id, i, elem.is_elite)
     #     print(elem.gen)
-    #     print("\n".join(elem.get_phenotype()))
+    #     print("\n".join(elem.get_phenotype_queries()))
     #     print("\n")
 
     all_elites = []
@@ -287,7 +335,7 @@ def test():
         # for i, elem in enumerate(epoch_population):
         #     print(elem.process_id, i, elem.is_elite)
         #     print(elem.gen)
-        #     print("\n".join(elem.get_phenotype()))
+        #     print("\n".join(elem.get_phenotype_queries()))
         #     print("\n")
 
 
@@ -315,7 +363,7 @@ def test():
         # for i, elem in enumerate(epoch_population):
         #     print(elem.process_id, i, elem.is_elite)
         #     print(elem.gen)
-        #     print("\n".join(elem.get_phenotype()))
+        #     print("\n".join(elem.get_phenotype_queries()))
         #     print("\n")
 
         population = epoch_population
@@ -329,7 +377,7 @@ def main():
     # in order to have proportional execution times.
     len_defs = len(defs)
     # len_population = int(math.ceil(len_defs / cpu_count) * cpu_count)
-    len_population = 18
+    len_population = 54
     # population = [PositionGen(defs, i % len_defs) for i in range(len_population)]
     population = [RandomGen(defs, 0.075) for _ in range(len_population)]
 
@@ -339,32 +387,31 @@ def main():
 
     for i in range(epochs):
         len_population = len(population)
-        # print("*** iteration:", i + 1)
 
-        profiles = []
+        raw_rewards = []
         def callback(r):
-            profiles.append(r)
+            raw_rewards.append(r)
         pool = mp.Pool(6)
         for elem in population:
             pool.apply_async(run_index, args=(db_src, elem), callback=callback)
-            # profiles.append(run_index(db_src, elem))
 
         pool.close()
         pool.join()
+        rewards = normalize_rewards(raw_rewards)
         n_prof = math.ceil(len_population * 0.075)
 
-        # print("profiles", profiles)
-        top_profiles = get_top_n(profiles, n=n_prof)
+        # print("rewards", rewards)
+        top_rewards = get_top_n(rewards, n=n_prof)
 
-        # print(profiles)
-        # print(top_profiles[0])
-        top_profile_1 = top_profiles[0]
+        # print(rewards)
+        # print(top_rewards[0])
+        top_profile_1 = top_rewards[0]
         map_population = {elem.process_id: elem for elem in population}
 
-        # for k, v in profiles:
+        # for k, v in rewards:
         #     print(map_population[k].get_gen_str(), v)
 
-        epoch_population = [deepcopy(map_population[process_id]) for process_id, _ in top_profiles]
+        epoch_population = [deepcopy(map_population[process_id]) for process_id, _ in top_rewards]
 
         for elem in epoch_population:
             elem.is_elite = True
@@ -373,11 +420,7 @@ def main():
 
         all_elites.append(deepcopy(best_elem))
 
-        print(best_elem.gen)
-
-        # for x in population:
-        #     print(x.get_gen_str(), x.process_id, "*" if best_elem.process_id == x.process_id else "")
-        for k, v in profiles:
+        for k, v in rewards:
             x = map_population[k]
             print(x.get_gen_str(), x.process_id, "%.3f" % v, "*" if best_elem.process_id == x.process_id else " ")
 
@@ -397,7 +440,7 @@ def main():
         # for i, elem in enumerate(epoch_population):
         #     print(elem.process_id, i, elem.is_elite)
         #     print(elem.gen)
-        #     print("\n".join(elem.get_phenotype()))
+        #     print("\n".join(elem.get_phenotype_queries()))
         #     print("\n")
 
 
@@ -408,9 +451,7 @@ def main():
                     epoch_population[rindex].pick_best(elem)
             else:
                 if random() < 0.7:
-                # if random() < 1:
                     elem.mutate()
-                # if random() < 1:
                 if random() < 0.2:
                     rindex = randint(0, len_population - 1)
                     elem.crossover(
@@ -427,14 +468,14 @@ def main():
         # for i, elem in enumerate(epoch_population):
         #     print(elem.process_id, i, elem.is_elite)
         #     print(elem.gen)
-        #     print("\n".join(elem.get_phenotype()))
+        #     print("\n".join(elem.get_phenotype_queries()))
         #     print("\n")
         population = epoch_population
 
     for i, elem in enumerate(all_elites):
         print(elem.process_id, i, elem.is_elite)
         print(elem.gen)
-        print("\n".join(elem.get_phenotype()))
+        print("\n".join(elem.get_phenotype_queries()))
         print("\n")
 
     # print("\n", "final", "\n")
@@ -442,7 +483,7 @@ def main():
     # for i, elem in enumerate(population):
     #     print(elem.process_id, i, elem.is_elite)
     #     print(elem.gen)
-    #     print("\n".join(elem.get_phenotype()))
+    #     print("\n".join(elem.get_phenotype_queries()))
     #     print("\n")
 
     # last_profiles = []
@@ -470,6 +511,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # single_thread()
     # p1 = Process(target=run_index, args=("TPC-H-small.db", "p1"))
     # p1.start()
     # p2 = Process(target=run_index, args=("TPC-H-small.db", "p2"))
@@ -503,7 +545,7 @@ if __name__ == '__main__':
 #     population = [RandomGen(defs, 0.075) for _ in range(len_population)]
 
 #     for elem in population:
-#         print("\n".join(elem.get_phenotype()), "\n")
+#         print("\n".join(elem.get_phenotype_queries()), "\n")
 
 #     epochs = 30
 
@@ -570,22 +612,6 @@ if __name__ == '__main__':
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # def main():
 #     db_src = "dbs/TPC-H-small.db"
 #     defs = get_defs(db_src)
@@ -607,7 +633,7 @@ if __name__ == '__main__':
 #     for i, elem in enumerate(population):
 #         print(elem.process_id, i, elem.is_elite)
 #         print(elem.gen)
-#         print("\n".join(elem.get_phenotype()))
+#         print("\n".join(elem.get_phenotype_queries()))
 #         print("\n")
 
 #     epochs = 1
