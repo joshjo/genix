@@ -1,4 +1,5 @@
 from copy import copy, deepcopy
+import sqlite3
 import os, errno
 from collections import defaultdict
 from random import randint, random, shuffle
@@ -6,7 +7,6 @@ import numpy as np
 import queries
 import math
 import shutil
-import sqlite3
 import time
 import uuid
 import multiprocessing as mp
@@ -43,6 +43,9 @@ all_queries = [
 
 
 # def get_tables(connection):
+
+MAX_TOTAL_TIME = 10
+MAX_INDEX_SIZE = 100_000_000
 
 
 def silentremove(filename):
@@ -207,28 +210,34 @@ def run_index(db_name, elem):
 
 
 def normalize_rewards(rewards):
-    max_total_time = max(rewards, key= lambda a: a[1])[1]
-    max_query_size = max(rewards, key= lambda a: a[2])[2]
     return [
         (
             i[0],
-            ((i[1] * 0.85) / max_total_time) + ((i[2] * 0.15)/ max_query_size),
+            ((i[1] * 0.85) / MAX_TOTAL_TIME) + ((i[2] * 0.15) / MAX_INDEX_SIZE),
         ) for i in rewards
     ]
 
 
+def is_dominant(a, b):
+    return a[1] <= b[1] and a[2] <= b[2]
+
+
+def get_pareto(values):
+    pareto = copy(values)
+    i = 0
+    while i < len(pareto):
+        j = i + 1
+        while j < len(pareto):
+            if is_dominant(pareto[i], pareto[j]):
+                del pareto[j]
+                continue
+            j += 1
+        i += 1
+    return pareto
+
+
 def get_top_n(rewards, n=1):
     return sorted(rewards, key=lambda a: a[1])[:n]
-# def get_top_n(rewards, n=1):
-#     max_total_time = max(rewards, key= lambda a: a[1])[1]
-#     max_query_size = max(rewards, key= lambda a: a[2])[2]
-#     normalized = [
-#         (
-#             i[0],
-#             ((i[1] * 0.85) / max_total_time) + ((i[2] * 0.15)/ max_query_size),
-#         ) for i in rewards
-#     ]
-#     return sorted(normalized, key=lambda a: a[-1])[:n]
 
 
 def single_thread():
@@ -369,7 +378,7 @@ def test():
         population = epoch_population
 
 
-def main():
+def main(use_pareto=False):
     db_src = "dbs/TPC-H-small.db"
     defs = get_defs(db_src)
     cpu_count = mp.cpu_count()
@@ -380,6 +389,7 @@ def main():
     len_population = 54
     # population = [PositionGen(defs, i % len_defs) for i in range(len_population)]
     population = [RandomGen(defs, 0.075) for _ in range(len_population)]
+    means = []
 
     all_elites = []
 
@@ -397,21 +407,21 @@ def main():
 
         pool.close()
         pool.join()
-        rewards = normalize_rewards(raw_rewards)
-        n_prof = math.ceil(len_population * 0.075)
 
-        # print("rewards", rewards)
-        top_rewards = get_top_n(rewards, n=n_prof)
+        if use_pareto:
+            top_rewards = get_pareto(raw_rewards)
+        else:
+            rewards = normalize_rewards(raw_rewards)
+            n_prof = math.ceil(len_population * 0.075)
+            top_rewards = get_top_n(rewards, n=n_prof)
 
-        # print(rewards)
-        # print(top_rewards[0])
         top_profile_1 = top_rewards[0]
         map_population = {elem.process_id: elem for elem in population}
 
         # for k, v in rewards:
         #     print(map_population[k].get_gen_str(), v)
 
-        epoch_population = [deepcopy(map_population[process_id]) for process_id, _ in top_rewards]
+        epoch_population = [deepcopy(map_population[reward[0]]) for reward in top_rewards]
 
         for elem in epoch_population:
             elem.is_elite = True
@@ -419,14 +429,24 @@ def main():
         best_elem = map_population[top_profile_1[0]]
 
         all_elites.append(deepcopy(best_elem))
-
-        for k, v in rewards:
-            x = map_population[k]
-            print(x.get_gen_str(), x.process_id, "%.3f" % v, "*" if best_elem.process_id == x.process_id else " ")
+        if use_pareto:
+            # for k in top_rewards:
+            plain_top_rewards = {i[0]: i for i in top_rewards}
+            for reward in raw_rewards:
+                x = map_population[reward[0]]
+                print(x.get_gen_str(), x.process_id, "%.3f" % reward[1], "%.3f" % reward[2], "*" if x.process_id in plain_top_rewards else " ")
+            obj1 = [x[1] for x in raw_rewards]
+            obj2 = [x[2] for x in raw_rewards]
+            means.append([np.mean(obj1), np.mean(obj2)])
+        else:
+            for k, v in rewards:
+                x = map_population[k]
+                print(x.get_gen_str(), x.process_id, "%.3f" % v, "*" if best_elem.process_id == x.process_id else " ")
+            print("best elem", best_elem.get_gen_str(), i, top_profile_1)
 
         print("\n")
 
-        # print(best_elem.get_gen_str(), i, top_profile_1)
+
 
         while len(epoch_population) < len_population:
             rindex = randint(0, len_population - 1)
@@ -472,11 +492,13 @@ def main():
         #     print("\n")
         population = epoch_population
 
-    for i, elem in enumerate(all_elites):
-        print(elem.process_id, i, elem.is_elite)
-        print(elem.gen)
-        print("\n".join(elem.get_phenotype_queries()))
-        print("\n")
+    print("means", means)
+
+    # for i, elem in enumerate(all_elites):
+    #     print(elem.process_id, i, elem.is_elite)
+    #     print(elem.gen)
+    #     print("\n".join(elem.get_phenotype_queries()))
+    #     print("\n")
 
     # print("\n", "final", "\n")
 
@@ -510,7 +532,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main(use_pareto=True)
     # single_thread()
     # p1 = Process(target=run_index, args=("TPC-H-small.db", "p1"))
     # p1.start()
