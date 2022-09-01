@@ -82,6 +82,9 @@ class BaseGen:
 
     def get_phenotype(self):
         indexes = [v for k, v in zip(self.gen, self.index_defs) if k]
+
+        print("--> indexes", indexes)
+
         table_columns = defaultdict(list)
         for k, v in indexes:
             table_columns[k].append(v)

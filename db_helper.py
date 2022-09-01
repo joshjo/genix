@@ -1,5 +1,5 @@
-from copy import copy, deepcopy
-from collections import defaultdict
+import os, errno
+import shutil
 import sqlite3
 
 
@@ -19,3 +19,17 @@ def get_defs(db_name, plain=True):
 
     return result_dict
 
+
+def copy_db(src, dst):
+    path_dst = f'/dev/shm/db_{dst}.db'
+    shutil.copyfile(src, path_dst)
+
+    return path_dst
+
+
+def silentremove(filename):
+    try:
+        os.remove(filename)
+    except OSError as e: # this would be "except OSError, e:" before Python 2.6
+        if e.errno != errno.ENOENT: # errno.ENOENT = no such file or directory
+            raise # re-raise exception if a different error occurred
