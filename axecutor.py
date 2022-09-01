@@ -449,8 +449,6 @@ def main(use_pareto=False):
 
         print("\n")
 
-
-
         while len(epoch_population) < len_population:
             rindex = randint(0, len_population - 1)
             new_elem = copy(population[rindex])

@@ -1,11 +1,14 @@
 from collections import defaultdict
-from random import random
+from copy import copy, deepcopy
+from random import random, randint, shuffle
+import math
 import multiprocessing as mp
 import sqlite3
 import time
 import uuid
 
 from db_helper import copy_db, get_defs, silentremove
+from ga_helper import get_top_n, normalize_rewards
 import queries
 
 ACTIVE = 1
@@ -118,6 +121,28 @@ class BaseGen:
         self.index_defs = index_defs
         self.assign_process_id()
 
+    def pick_best(self, other, ratio=0.5):
+        for i in range(len(self.gen)):
+            if other.gen[i] == ACTIVE and random() < ratio:
+                self.gen[i] = other.gen[i]
+
+    def mutate(self, ratio=0.2):
+        """
+        The chance of removing an index should be greater than adding
+        """
+        rindex = randint(0, len(self.gen) - 1)
+        if self.gen[rindex] == NOINDEX and random() < ratio:
+          self.gen[rindex] = ACTIVE
+        elif self.gen[rindex] == ACTIVE and random() < 1 - ratio:
+            self.gen[rindex] = 0
+
+    def crossover(self, other, partial=False):
+        rindex = randint(0, len(self.gen) - 2)
+        if partial:
+            self.gen[:rindex] = other.gen[:rindex]
+        else:
+            self.gen[:rindex], other.gen[:rindex] = other.gen[:rindex], self.gen[:rindex]
+
     def get_gen_str(self):
         array_str = ["█" if i else "·" for i in self.gen]
         return "|" + "".join(array_str) + "|"
@@ -156,15 +181,74 @@ class RandomTableGen(BaseGen):
         for i in range(from_pos, to_pos):
             self.gen[i] = ACTIVE if random() < ratio else NOINDEX
 
+    def mutate(self, from_pos, length, ratio=0.2):
+        """
+        The chance of removing an index should be greater than adding
+        """
+        rindex = randint(from_pos, from_pos + length)
+        if self.gen[rindex] == NOINDEX and random() < ratio:
+          self.gen[rindex] = ACTIVE
+        elif self.gen[rindex] == ACTIVE and random() < 1 - ratio:
+            self.gen[rindex] = 0
 
 class Dome:
     def __init__(self, name, columns, flat_defs, from_pos):
         self.name = name
-        len_columns = len(columns)
+        self.len_columns = len(columns)
+        self.from_pos = from_pos
         self.population = [
-            RandomTableGen(flat_defs, ratio=0.2, from_pos=from_pos, length=len_columns)
+            RandomTableGen(flat_defs, ratio=0.3, from_pos=from_pos, length=self.len_columns)
             for _ in columns
         ]
+
+    def evolve(self, db_src):
+        raw_rewards = []
+        len_population = len(self.population)
+
+        for individual in self.population:
+            raw_rewards.append(run_index(db_name=db_src, elem=individual))
+        n_prof = math.ceil(len_population * 0.075)
+        rewards = normalize_rewards(raw_rewards)
+        top_rewards = get_top_n(rewards, n=n_prof)
+        map_population = {elem.process_id: elem for elem in self.population}
+        epoch_population = [deepcopy(map_population[reward[0]]) for reward in top_rewards]
+
+        for elem in epoch_population:
+            elem.is_elite = True
+
+
+        for elem, reward in zip(self.population, raw_rewards):
+            print(elem.process_id, elem.get_gen_str(), reward)
+
+        shuffle(epoch_population)
+
+        while len(epoch_population) < len_population:
+            rindex = randint(0, len_population - 1)
+            new_elem = copy(self.population[rindex])
+            new_elem.assign_process_id()
+            new_elem.is_elite = False
+            epoch_population.append(new_elem)
+
+        for elem in epoch_population:
+            if elem.is_elite:
+                rindex = randint(0, len_population - 1)
+                if not epoch_population[rindex].is_elite:
+                    epoch_population[rindex].pick_best(elem)
+            else:
+                if random() < 0.3:
+                    elem.mutate(self.from_pos, self.len_columns)
+                if random() < 0.7:
+                    rindex = randint(0, len_population - 1)
+                    elem.crossover(
+                        epoch_population[rindex],
+                        partial=epoch_population[rindex].is_elite,
+                    )
+
+        print("--------------")
+        for elem in epoch_population:
+            print(elem.process_id, elem.get_gen_str())
+                # if random() < 0.05:
+                #     elem.shuffle_gen()
 
 
 class Genix:
@@ -190,16 +274,17 @@ class Genix:
                 print(i.get_gen_str())
 
     def evolve(self):
-        for dome in self.domes:
-            print("dome: ", dome.name)
-            for individual in dome.population:
-                result = run_index(db_name=self.db_src, elem=individual)
-                print("--> result", result)
-            print("----")
+        for dome in self.domes[2:3]:
+            dome.evolve(self.db_src)
+            # print("dome: ", dome.name)
+            # for individual in dome.population:
+            #     result = run_index(db_name=self.db_src, elem=individual)
+            #     print("--> result", result)
+            # print("----")
 
 
 if __name__ == "__main__":
     genix = Genix()
     genix.create_domes()
-    genix.print_population()
+    # genix.print_population()
     genix.evolve()
