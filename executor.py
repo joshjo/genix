@@ -58,22 +58,31 @@ queries = [
 #         # return cur_result
 
 
-def run_index(db_name, index_query):
+def run_index(db_name):
     file_db = sqlite3.connect(db_name)
+    # index_a = "CREATE INDEX IF NOT EXISTS index_a ON lineitem(l_partkey);"
+    index_a = "DROP INDEX IF EXISTS index_a;"
     # mem_db = sqlite3.connect('/mnt/tmp/tmp1.db')
     # query = "".join(line for line in file_db.iterdump())
     # mem_db.executescript(query)
     cursor = file_db.cursor()
-    for query_number, query in enumerate(queries):
+    cursor.execute(index_a)
+    total_time = 0
+    for query_number, query in queries:
         s = time.time()
-        cursor.execute(query)
+        cursor.executescript(query)
         cur_result = cursor.fetchone()
+        # print("cur_result", cur_result)
         e = time.time()
-        print("query:", query_number, "took:", e - s)
+        took = e - s
+        total_time += took
+        print("query:", query_number, "took:", took)
+
+    print("total", total_time)
 
 
 if __name__ == '__main__':
-    run_index('TPC-H-small.db', 'tmp')
+    run_index('dbs/tcph.db')
 
     # runner = RunTPCH('TPC-H-small.db')
     # Get index size.
