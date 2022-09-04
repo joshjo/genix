@@ -7,36 +7,16 @@ import sqlite3
 import time
 import uuid
 
-from db_helper import copy_db, get_defs, silentremove
+from db_helper import (
+    BENCHMARK_QUERIES,
+    copy_db,
+    get_defs,
+    silentremove,
+)
 from ga_helper import get_top_n, normalize_rewards
-import queries
 
 ACTIVE = 1
 NOINDEX = 0
-
-all_queries = [
-    ("query 1", queries.query_1),
-    ("query 2", queries.query_2),
-    ("query 3", queries.query_3),
-    ("query 4", queries.query_4),
-    ("query 5", queries.query_5),
-    ("query 6", queries.query_6),
-    ("query 7", queries.query_7),
-    ("query 8", queries.query_8),
-    ("query 9", queries.query_9),
-    ("query 10", queries.query_10),
-    ("query 11", queries.query_11),
-    ("query 12", queries.query_12),
-    ("query 13", queries.query_13),
-    ("query 14", queries.query_14),
-    # ("query 15", queries.query_15),
-    ("query 16", queries.query_16),
-    # ("query 17", queries.query_17),
-    ("query 18", queries.query_18),
-    ("query 19", queries.query_19),
-    # ("query 20", queries.query_20),
-    ("query 21", queries.query_21),
-]
 
 
 # The relation is based is on who received the connection
@@ -87,30 +67,29 @@ def run_index(db_name, elem):
     mem_db = sqlite3.connect(mem_dbname)
     cursor = mem_db.cursor()
     phenotype = elem.get_phenotype()
-    queries = elem.get_phenotype_queries(phenotype)
+    create_index_queries = elem.get_phenotype_queries(phenotype)
 
-    for query in queries:
+    for query in create_index_queries:
         cursor.execute(query)
 
     total_time = 0
 
     index_size_query_query = get_index_size_query(phenotype)
-
     pointer = cursor.execute(index_size_query_query)
     qq = pointer.fetchone()
     query_size = qq[0]
 
-    for query_number, query in all_queries:
+    for _, query in BENCHMARK_QUERIES:
         s = time.perf_counter()
-        cursor.execute(query)
+        cursor.executescript(query)
         cursor.fetchone()
         e = time.perf_counter()
-        local_time = e - s
-        total_time += local_time
+        query_time = e - s
+        total_time += query_time
     mem_db.close()
     silentremove(mem_dbname)
     # print(f"{elem.process_id},{total_time},{len(queries)}")
-    return (elem.process_id, total_time, query_size)
+    return (elem.process_id, round(total_time, 1), query_size)
 
 
 
@@ -201,21 +180,24 @@ class Dome:
             for _ in columns
         ]
 
-    def evolve(self, db_src):
+    def evaluate(self, db_src):
         raw_rewards = []
-        len_population = len(self.population)
-
         for individual in self.population:
             raw_rewards.append(run_index(db_name=db_src, elem=individual))
+        normalized_rewards = normalize_rewards(raw_rewards)
+        return raw_rewards, normalized_rewards
+
+    def evolve(self, db_src):
+        len_population = len(self.population)
         n_prof = math.ceil(len_population * 0.075)
-        rewards = normalize_rewards(raw_rewards)
+        raw_rewards, rewards = self.evaluate(db_src)
+
         top_rewards = get_top_n(rewards, n=n_prof)
         map_population = {elem.process_id: elem for elem in self.population}
-        epoch_population = [deepcopy(map_population[reward[0]]) for reward in top_rewards]
+        epoch_population = [map_population[reward[0]] for reward in top_rewards]
 
         for elem in epoch_population:
             elem.is_elite = True
-
 
         for elem, reward in zip(self.population, raw_rewards):
             print(elem.process_id, elem.get_gen_str(), reward)
@@ -249,6 +231,7 @@ class Dome:
             print(elem.process_id, elem.get_gen_str())
                 # if random() < 0.05:
                 #     elem.shuffle_gen()
+        self.population = epoch_population
 
 
 class Genix:
@@ -274,13 +257,15 @@ class Genix:
                 print(i.get_gen_str())
 
     def evolve(self):
-        for dome in self.domes[2:3]:
-            dome.evolve(self.db_src)
-            # print("dome: ", dome.name)
-            # for individual in dome.population:
-            #     result = run_index(db_name=self.db_src, elem=individual)
-            #     print("--> result", result)
-            # print("----")
+        for i in range(2):
+            print("i", i + 1)
+            for dome in self.domes[1:2]:
+                dome.evolve(self.db_src)
+                # print("dome: ", dome.name)
+                # for individual in dome.population:
+                #     result = run_index(db_name=self.db_src, elem=individual)
+                #     print("--> result", result)
+                # print("----")
 
 
 if __name__ == "__main__":
