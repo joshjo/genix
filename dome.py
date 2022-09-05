@@ -88,7 +88,6 @@ def run_index(db_name, elem):
         total_time += query_time
     mem_db.close()
     silentremove(mem_dbname)
-    # print(f"{elem.process_id},{total_time},{len(queries)}")
     return (elem.process_id, round(total_time, 1), query_size)
 
 
@@ -159,12 +158,14 @@ class RandomTableGen(BaseGen):
         to_pos = min(from_pos + length, size)
         for i in range(from_pos, to_pos):
             self.gen[i] = ACTIVE if random() < ratio else NOINDEX
+        self.from_pos = from_pos
+        self.to_pos = to_pos
 
-    def mutate(self, from_pos, length, ratio=0.2):
+    def mutate(self, ratio=0.2):
         """
         The chance of removing an index should be greater than adding
         """
-        rindex = randint(from_pos, from_pos + length)
+        rindex = randint(self.from_pos, self.to_pos)
         if self.gen[rindex] == NOINDEX and random() < ratio:
           self.gen[rindex] = ACTIVE
         elif self.gen[rindex] == ACTIVE and random() < 1 - ratio:
@@ -176,7 +177,7 @@ class Dome:
         self.len_columns = len(columns)
         self.from_pos = from_pos
         self.population = [
-            RandomTableGen(flat_defs, ratio=0.3, from_pos=from_pos, length=self.len_columns)
+            RandomTableGen(flat_defs, ratio=0.2, from_pos=from_pos, length=self.len_columns)
             for _ in columns
         ]
 
@@ -187,7 +188,11 @@ class Dome:
         normalized_rewards = normalize_rewards(raw_rewards)
         return raw_rewards, normalized_rewards
 
-    def evolve(self, db_src):
+    def evolve(self, db_src, metropolis=0):
+        """
+        :param progress: a value from 0 to 1 which determines the progress of the iterations
+            if progress is 0 then it is starting. if it is 1 then all
+        """
         len_population = len(self.population)
         n_prof = math.ceil(len_population * 0.075)
         raw_rewards, rewards = self.evaluate(db_src)
@@ -212,32 +217,52 @@ class Dome:
             epoch_population.append(new_elem)
 
         for elem in epoch_population:
-            if elem.is_elite:
+            if elem.is_elite and not random() < metropolis:
+                continue
+            if random() < 0.3:
+                elem.mutate()
+            if random() < 0.7:
                 rindex = randint(0, len_population - 1)
-                if not epoch_population[rindex].is_elite:
-                    epoch_population[rindex].pick_best(elem)
-            else:
-                if random() < 0.3:
-                    elem.mutate(self.from_pos, self.len_columns)
-                if random() < 0.7:
-                    rindex = randint(0, len_population - 1)
-                    elem.crossover(
-                        epoch_population[rindex],
-                        partial=epoch_population[rindex].is_elite,
-                    )
+                elem.crossover(
+                    epoch_population[rindex],
+                    partial=epoch_population[rindex].is_elite,
+                )
 
-        print("--------------")
-        for elem in epoch_population:
-            print(elem.process_id, elem.get_gen_str())
+        # for elem in epoch_population:
+        #     print(elem.process_id, elem.get_gen_str())
                 # if random() < 0.05:
                 #     elem.shuffle_gen()
         self.population = epoch_population
 
+    def random_interchange(self, other):
+        self_rand_index = randint(0, len(self.population) - 1)
+        other_rand_index = randint(0, len(other.population) - 1)
+        print("self index", self_rand_index, "to index", other_rand_index)
+        temp = self.population[self_rand_index]
+        self.population[self_rand_index] = other.population[other_rand_index]
+        other.population[other_rand_index] = temp
+
+
+class SA:
+    def __init__(self, total_iterations, temp):
+        self.temp = temp
+        self.total_iterations = total_iterations
+        self.ratio = temp / total_iterations
+
+    def reduce(self):
+        val =  1 - math.exp(-self.temp/self.total_iterations)
+        self.temp -= self.ratio
+        return val
+
 
 class Genix:
-    def __init__(self):
+    def __init__(self, num_evolutions=2):
         self.domes = []
+        self.map_domes = {}
         self.db_src = "dbs/TPC-H-small.db"
+        self.num_evolutions = num_evolutions
+        init_temp = 0
+        self.sa = SA(num_evolutions, init_temp)
 
     def create_domes(self):
         pos = 0
@@ -247,29 +272,83 @@ class Genix:
             for column in columns:
                 flat_defs.append((name, column))
         for k, v in map_defs.items():
-            self.domes.append(Dome(k, v, flat_defs, pos))
+            dome = Dome(k, v, flat_defs, pos)
+            self.domes.append(dome)
+            self.map_domes[k] = dome
             pos += len(v)
+
 
     def print_population(self):
         for index, dome in enumerate(self.domes):
-            print("dome: ", index + 1)
+            print("dome: ", dome.name)
             for i in dome.population:
                 print(i.get_gen_str())
 
+    def _emigrate(self):
+        for name_from, connected_domes in edges.items():
+            for name_to in connected_domes:
+                if random() < 0.15:
+                    dome_from = self.map_domes[name_from]
+                    dome_to = self.map_domes[name_to]
+                    dome_from.random_interchange(dome_to)
+
     def evolve(self):
-        for i in range(2):
-            print("i", i + 1)
-            for dome in self.domes[1:2]:
-                dome.evolve(self.db_src)
-                # print("dome: ", dome.name)
-                # for individual in dome.population:
-                #     result = run_index(db_name=self.db_src, elem=individual)
-                #     print("--> result", result)
-                # print("----")
+        for i in range(self.num_evolutions):
+            metropolis = self.sa.reduce()
+            # pool = mp.Pool(6)
+            # for dome in self.domes:
+            #     pool.apply_async(dome.evolve, args=(self.db_src, metropolis), )
+            # pool.close()
+            # pool.join()
+            for dome in self.domes:
+                dome.evolve(self.db_src, metropolis)
+            self._emigrate()
+            self.print_population()
+                # dome.evolve(self.db_src, metropolis)
+
+
+def dump(seconds):
+    print("waiting", seconds, "seconds")
+    time.sleep(seconds)
+    print("finish", seconds, "seconds")
+
+
+class Parallel:
+    def __init__(self, domes):
+        self.domes = domes
+
+    def evolve(self):
+        for iter in range(1):
+            # pool = mp.Pool(6)
+            for dome in self.domes:
+                dump(dome)
+                # pool.apply_async(dump, args=(dome,))
+            # pool.close()
+            # pool.join()
+
 
 
 if __name__ == "__main__":
+    # p = Parallel([2, 4, 3, 7, 4])
+    # p.evolve()
     genix = Genix()
     genix.create_domes()
-    # genix.print_population()
     genix.evolve()
+    # genix.print_population()
+    # genix.print_population()
+
+
+
+
+
+
+
+
+    # print("-->", genix.map_domes)
+    # # genix.print_population()
+    # genix.evolve()
+    # total_iterations = 100
+    # sa = SA(15, total_iterations)
+
+    # for i in range(total_iterations):
+    #     print(sa.reduce())
