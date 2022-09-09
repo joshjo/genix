@@ -1,9 +1,11 @@
 from collections import defaultdict
 from copy import copy, deepcopy
-from random import random, randint, shuffle
+from random import random, randint, shuffle, uniform
 import math
 import multiprocessing as mp
+import numpy as np
 import sqlite3
+from tensorboardX import SummaryWriter
 import time
 import uuid
 
@@ -165,14 +167,30 @@ class RandomTableGen(BaseGen):
         """
         The chance of removing an index should be greater than adding
         """
-        rindex = randint(self.from_pos, self.to_pos)
+        rindex = randint(self.from_pos, self.to_pos - 1)
         if self.gen[rindex] == NOINDEX and random() < ratio:
           self.gen[rindex] = ACTIVE
         elif self.gen[rindex] == ACTIVE and random() < 1 - ratio:
             self.gen[rindex] = 0
 
+
+class Elem:
+    def __init__(self, value):
+        self.individual = [value for _ in range(10)]
+        self.process_id = str(uuid.uuid4())[:8]
+
+    def __repr__(self):
+        return str(self.individual)
+
+    def update_value(self, value):
+        for i in range(len(self.individual)):
+            self.individual[i] += value
+
+
+
 class Dome:
     def __init__(self, name, columns, flat_defs, from_pos):
+        # self.population = [Elem(2) for _ in columns]
         self.name = name
         self.len_columns = len(columns)
         self.from_pos = from_pos
@@ -180,6 +198,11 @@ class Dome:
             RandomTableGen(flat_defs, ratio=0.2, from_pos=from_pos, length=self.len_columns)
             for _ in columns
         ]
+        # change according the Algorithm type (i.e. if it is pareto)
+        self._metadata = {
+            "averages": [],
+            "bests": [],
+        }
 
     def evaluate(self, db_src):
         raw_rewards = []
@@ -188,24 +211,22 @@ class Dome:
         normalized_rewards = normalize_rewards(raw_rewards)
         return raw_rewards, normalized_rewards
 
-    def evolve(self, db_src, metropolis=0):
+    def evolve(self, db_src, metropolis):
         """
         :param progress: a value from 0 to 1 which determines the progress of the iterations
             if progress is 0 then it is starting. if it is 1 then all
         """
         len_population = len(self.population)
-        n_prof = math.ceil(len_population * 0.075)
+        n_top = math.ceil(len_population * 0.075)
         raw_rewards, rewards = self.evaluate(db_src)
+        sorted_rewards = sorted(rewards, key=lambda a: a[1])
+        top_rewards = sorted_rewards[:n_top]
 
-        top_rewards = get_top_n(rewards, n=n_prof)
         map_population = {elem.process_id: elem for elem in self.population}
         epoch_population = [map_population[reward[0]] for reward in top_rewards]
 
         for elem in epoch_population:
             elem.is_elite = True
-
-        for elem, reward in zip(self.population, raw_rewards):
-            print(elem.process_id, elem.get_gen_str(), reward)
 
         shuffle(epoch_population)
 
@@ -227,17 +248,14 @@ class Dome:
                     epoch_population[rindex],
                     partial=epoch_population[rindex].is_elite,
                 )
-
-        # for elem in epoch_population:
-        #     print(elem.process_id, elem.get_gen_str())
-                # if random() < 0.05:
-                #     elem.shuffle_gen()
-        self.population = epoch_population
+        return self.name, {
+            "new_population": epoch_population,
+            "sorted_rewards": sorted_rewards,
+        }
 
     def random_interchange(self, other):
         self_rand_index = randint(0, len(self.population) - 1)
         other_rand_index = randint(0, len(other.population) - 1)
-        print("self index", self_rand_index, "to index", other_rand_index)
         temp = self.population[self_rand_index]
         self.population[self_rand_index] = other.population[other_rand_index]
         other.population[other_rand_index] = temp
@@ -256,7 +274,7 @@ class SA:
 
 
 class Genix:
-    def __init__(self, num_evolutions=2):
+    def __init__(self, num_evolutions=10):
         self.domes = []
         self.map_domes = {}
         self.db_src = "dbs/TPC-H-small.db"
@@ -285,47 +303,66 @@ class Genix:
                 print(i.get_gen_str())
 
     def _emigrate(self):
+        num_emigrations = 0
         for name_from, connected_domes in edges.items():
             for name_to in connected_domes:
                 if random() < 0.15:
                     dome_from = self.map_domes[name_from]
                     dome_to = self.map_domes[name_to]
                     dome_from.random_interchange(dome_to)
+                    num_emigrations += 1
+        return num_emigrations
+
+    def merge_results(self, results, writer, iter):
+        for dome in self.domes:
+            result = results[dome.name]
+            new_population = result["new_population"]
+            sorted_rewards = result["sorted_rewards"]
+            best_so_far = sorted_rewards[1][1]
+            avg_value = np.average([x[1] for x in sorted_rewards])
+            dome._metadata["bests"].append(best_so_far)
+            dome._metadata["averages"].append(avg_value)
+
+            dome.population = new_population
+            delta = 1 / (iter + 1);
+            offline = np.sum(dome._metadata["bests"]) * delta
+            online = np.sum(dome._metadata["averages"]) * delta
+
+            best_so_far_id = sorted_rewards[1]
+            for best_item in new_population:
+                if best_item.process_id == best_so_far_id:
+                    break
+
+            writer.add_scalar(f"best-so-far/{dome.name}", best_so_far, iter)
+            writer.add_scalar(f"offline/{dome.name}", offline, iter)
+            writer.add_scalar(f"online/{dome.name}", online, iter)
+            writer.add_text(f"best-elem/{dome.name}", best_item.get_gen_str())
 
     def evolve(self):
-        for i in range(self.num_evolutions):
+        writer = SummaryWriter()
+        for iter in range(self.num_evolutions):
+            print("iter:", iter)
             metropolis = self.sa.reduce()
-            # pool = mp.Pool(6)
-            # for dome in self.domes:
-            #     pool.apply_async(dome.evolve, args=(self.db_src, metropolis), )
-            # pool.close()
-            # pool.join()
+            results = {}
+            pool = mp.Pool(12)
+            def callback(result):
+                key, value = result
+                results[key] = value
             for dome in self.domes:
-                dome.evolve(self.db_src, metropolis)
-            self._emigrate()
-            self.print_population()
-                # dome.evolve(self.db_src, metropolis)
+                pool.apply_async(dome.evolve, args=(self.db_src, metropolis), callback=callback)
+            pool.close()
+            pool.join()
+
+            self.merge_results(results, writer, iter)
+            num_migrations = self._emigrate()
+
+            writer.add_scalar(f"summar/emigrations", num_migrations, iter)
 
 
 def dump(seconds):
     print("waiting", seconds, "seconds")
     time.sleep(seconds)
     print("finish", seconds, "seconds")
-
-
-class Parallel:
-    def __init__(self, domes):
-        self.domes = domes
-
-    def evolve(self):
-        for iter in range(1):
-            # pool = mp.Pool(6)
-            for dome in self.domes:
-                dump(dome)
-                # pool.apply_async(dump, args=(dome,))
-            # pool.close()
-            # pool.join()
-
 
 
 if __name__ == "__main__":

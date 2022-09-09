@@ -21,10 +21,10 @@ BENCHMARK_QUERIES = [
     ("query 14", queries.query_14),
     ("query 15", queries.query_15),
     ("query 16", queries.query_16),
-    # ("query 17", queries.query_17),
+    ("query 17", queries.query_17),
     ("query 18", queries.query_18),
     ("query 19", queries.query_19),
-    # ("query 20", queries.query_20),
+    ("query 20", queries.query_20),
     ("query 21", queries.query_21),
 ]
 
