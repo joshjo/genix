@@ -306,7 +306,7 @@ class Genix:
         num_emigrations = 0
         for name_from, connected_domes in edges.items():
             for name_to in connected_domes:
-                if random() < 0.15:
+                if random() < 0.4:
                     dome_from = self.map_domes[name_from]
                     dome_to = self.map_domes[name_to]
                     dome_from.random_interchange(dome_to)
@@ -336,7 +336,11 @@ class Genix:
             writer.add_scalar(f"best-so-far/{dome.name}", best_so_far, iter)
             writer.add_scalar(f"offline/{dome.name}", offline, iter)
             writer.add_scalar(f"online/{dome.name}", online, iter)
-            writer.add_text(f"best-elem/{dome.name}", best_item.get_gen_str())
+
+            best_item = dome.population[0]
+            all_queries = "\n".join(best_item.get_phenotype_queries())
+            elem_string = f"gen: \n {best_item.get_gen_str()} \n\n pheno: \n {all_queries}"
+            writer.add_text(f"best-elem/{dome.name}", elem_string, iter)
 
     def evolve(self):
         writer = SummaryWriter()
