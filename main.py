@@ -1,7 +1,9 @@
 from collections import defaultdict
 from copy import copy, deepcopy
 from random import random, randint, shuffle, uniform
+from dotenv import dotenv_values
 import math
+import matplotlib.pyplot as plt
 import multiprocessing as mp
 import numpy as np
 import sqlite3
@@ -15,7 +17,7 @@ from db_helper import (
     get_defs,
     silentremove,
 )
-from ga_helper import get_top_n, normalize_rewards
+from ga_helper import get_top_n, normalize_rewards, get_pareto
 
 ACTIVE = 1
 NOINDEX = 0
@@ -31,6 +33,23 @@ edges = {
     'LINEITEM': ['ORDERS', 'PARTSUPP'],
 }
 
+def plot_pareto():
+    N = 21
+    x = np.linspace(0, 10, 11)
+    y = [3.9, 4.4, 10.8, 10.3, 11.2, 13.1, 14.1,  9.9, 13.9, 15.1, 12.5]
+
+    # fit a linear curve an estimate its y-values and their error.
+    a, b = np.polyfit(x, y, deg=1)
+    y_est = a * x + b
+    y_err = x.std() * np.sqrt(1/len(x) +
+                            (x - x.mean())**2 / np.sum((x - x.mean())**2))
+
+    fig, ax = plt.subplots()
+    ax.plot(x, y_est, '-')
+    ax.fill_between(x, y_est - y_err, y_est + y_err, alpha=0.2)
+    ax.plot(x, y, 'o', color='tab:brown')
+
+    return fig
 
 def clean_column_name(column):
     return column.split("_", 1)[1]
@@ -187,9 +206,8 @@ class Elem:
             self.individual[i] += value
 
 
-
-class Dome:
-    def __init__(self, name, columns, flat_defs, from_pos):
+class Deme:
+    def __init__(self, name, columns, flat_defs, from_pos, use_pareto=False):
         # self.population = [Elem(2) for _ in columns]
         self.name = name
         self.len_columns = len(columns)
@@ -199,6 +217,7 @@ class Dome:
             for _ in columns
         ]
         # change according the Algorithm type (i.e. if it is pareto)
+        self.use_pareto = use_pareto
         self._metadata = {
             "averages": [],
             "bests": [],
@@ -219,11 +238,20 @@ class Dome:
         len_population = len(self.population)
         n_top = math.ceil(len_population * 0.075)
         raw_rewards, rewards = self.evaluate(db_src)
-        sorted_rewards = sorted(rewards, key=lambda a: a[1])
-        top_rewards = sorted_rewards[:n_top]
-
+        epoch_population = []
         map_population = {elem.process_id: elem for elem in self.population}
-        epoch_population = [map_population[reward[0]] for reward in top_rewards]
+        summary = {}
+
+        if self.use_pareto:
+            selected_rewards = get_pareto(raw_rewards)
+            summary["non_dominants"] = selected_rewards
+        else:
+            sorted_rewards = sorted(rewards, key=lambda a: a[1])
+            selected_rewards = sorted_rewards[:n_top]
+            summary["sorted_rewards"] = sorted_rewards
+        epoch_population = [map_population[reward[0]] for reward in selected_rewards]
+
+        summary["new_population"] = epoch_population
 
         for elem in epoch_population:
             elem.is_elite = True
@@ -248,10 +276,7 @@ class Dome:
                     epoch_population[rindex],
                     partial=epoch_population[rindex].is_elite,
                 )
-        return self.name, {
-            "new_population": epoch_population,
-            "sorted_rewards": sorted_rewards,
-        }
+        return self.name, summary
 
     def random_interchange(self, other):
         self_rand_index = randint(0, len(self.population) - 1)
@@ -274,15 +299,15 @@ class SA:
 
 
 class Genix:
-    def __init__(self, num_evolutions=10):
-        self.domes = []
-        self.map_domes = {}
+    def __init__(self, num_generations=0):
+        self.demes = []
+        self.map_demes = {}
         self.db_src = "dbs/TPC-H-small.db"
-        self.num_evolutions = num_evolutions
+        self.num_generations = num_generations
         init_temp = 0
-        self.sa = SA(num_evolutions, init_temp)
+        self.sa = SA(num_generations, init_temp)
 
-    def create_domes(self):
+    def create_demes(self):
         pos = 0
         map_defs = get_defs(self.db_src)
         flat_defs = []
@@ -290,77 +315,95 @@ class Genix:
             for column in columns:
                 flat_defs.append((name, column))
         for k, v in map_defs.items():
-            dome = Dome(k, v, flat_defs, pos)
-            self.domes.append(dome)
-            self.map_domes[k] = dome
+            deme = Deme(k, v, flat_defs, pos)
+            self.demes.append(deme)
+            self.map_demes[k] = deme
             pos += len(v)
 
 
     def print_population(self):
-        for index, dome in enumerate(self.domes):
-            print("dome: ", dome.name)
-            for i in dome.population:
+        for index, deme in enumerate(self.demes):
+            print("deme: ", deme.name)
+            for i in deme.population:
                 print(i.get_gen_str())
 
     def _emigrate(self):
         num_emigrations = 0
-        for name_from, connected_domes in edges.items():
-            for name_to in connected_domes:
+        for name_from, connected_demes in edges.items():
+            for name_to in connected_demes:
                 if random() < 0.4:
-                    dome_from = self.map_domes[name_from]
-                    dome_to = self.map_domes[name_to]
-                    dome_from.random_interchange(dome_to)
+                    deme_from = self.map_demes[name_from]
+                    deme_to = self.map_demes[name_to]
+                    deme_from.random_interchange(deme_to)
                     num_emigrations += 1
         return num_emigrations
 
     def merge_results(self, results, writer, iter):
-        for dome in self.domes:
-            result = results[dome.name]
+        all_offline = 0
+        all_online = 0
+        all_best_elems = []
+        for deme in self.demes:
+            result = results[deme.name]
             new_population = result["new_population"]
             sorted_rewards = result["sorted_rewards"]
-            best_so_far = sorted_rewards[1][1]
+            best_so_far_id, best_so_far_score = sorted_rewards[0]
             avg_value = np.average([x[1] for x in sorted_rewards])
-            dome._metadata["bests"].append(best_so_far)
-            dome._metadata["averages"].append(avg_value)
+            deme._metadata["bests"].append(best_so_far_score)
+            deme._metadata["averages"].append(avg_value)
 
-            dome.population = new_population
+            deme.population = new_population
             delta = 1 / (iter + 1);
-            offline = np.sum(dome._metadata["bests"]) * delta
-            online = np.sum(dome._metadata["averages"]) * delta
+            offline = np.sum(deme._metadata["bests"]) * delta
+            online = np.sum(deme._metadata["averages"]) * delta
 
-            best_so_far_id = sorted_rewards[1]
+
             for best_item in new_population:
                 if best_item.process_id == best_so_far_id:
                     break
 
-            writer.add_scalar(f"best-so-far/{dome.name}", best_so_far, iter)
-            writer.add_scalar(f"offline/{dome.name}", offline, iter)
-            writer.add_scalar(f"online/{dome.name}", online, iter)
+            writer.add_scalar(f"best-so-far/{deme.name}", best_so_far_score, iter)
+            writer.add_scalar(f"offline/{deme.name}", offline, iter)
+            writer.add_scalar(f"online/{deme.name}", online, iter)
 
-            best_item = dome.population[0]
+            # best_item = deme.population[0]
             all_queries = "\n".join(best_item.get_phenotype_queries())
             elem_string = f"gen: \n {best_item.get_gen_str()} \n\n pheno: \n {all_queries}"
-            writer.add_text(f"best-elem/{dome.name}", elem_string, iter)
+            writer.add_text(f"best-elem/{deme.name}", elem_string, iter)
+
+            # Summary
+            all_offline += offline
+            all_online += online
+            all_best_elems.append([best_so_far_score, best_item, deme.name])
+            # Use this for pareto
+            # fig = plot_pareto()
+        len_demes = len(self.demes)
+        all_best_elems.sort(key=lambda x: x[0])
+        best_elem_score, best_item, best_elem_deme_name = all_best_elems[0]
+        elem_string = f"gen: \n {best_item.get_gen_str()} \n\n pheno: \n {all_queries} \n\n deme: {best_elem_deme_name}"
+        writer.add_text(f"best-elem/all", elem_string, iter)
+        writer.add_scalar(f"best-so-far/all", best_elem_score, iter)
+        writer.add_scalar(f"offline/all", all_offline / len_demes, iter)
+        writer.add_scalar(f"online/all", online / len_demes, iter)
 
     def evolve(self):
         writer = SummaryWriter()
-        for iter in range(self.num_evolutions):
+        for iter in range(self.num_generations):
             print("iter:", iter)
             metropolis = self.sa.reduce()
             results = {}
-            pool = mp.Pool(12)
+            pool = mp.Pool(10)
             def callback(result):
                 key, value = result
                 results[key] = value
-            for dome in self.domes:
-                pool.apply_async(dome.evolve, args=(self.db_src, metropolis), callback=callback)
+            for deme in self.demes:
+                pool.apply_async(deme.evolve, args=(self.db_src, metropolis), callback=callback)
             pool.close()
             pool.join()
 
             self.merge_results(results, writer, iter)
             num_migrations = self._emigrate()
 
-            writer.add_scalar(f"summar/emigrations", num_migrations, iter)
+            writer.add_scalar(f"summary/emigrations", num_migrations, iter)
 
 
 def dump(seconds):
@@ -370,18 +413,15 @@ def dump(seconds):
 
 
 if __name__ == "__main__":
+    values = dotenv_values(".env")
     # p = Parallel([2, 4, 3, 7, 4])
     # p.evolve()
-    genix = Genix()
-    genix.create_domes()
+    # env =
+    genix = Genix(num_generations=10)
+    genix.create_demes()
     genix.evolve()
     # genix.print_population()
     # genix.print_population()
-
-
-
-
-
 
 
 

@@ -48,6 +48,7 @@ def get_defs(db_name, plain=True):
 
 def copy_db(src, dst):
     path_dst = f'/dev/shm/db_{dst}.db'
+    # path_dst = f'./replications/db_{dst}.db'
     shutil.copyfile(src, path_dst)
 
     return path_dst
