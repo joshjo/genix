@@ -387,11 +387,12 @@ class Genix:
 
     def evolve(self):
         writer = SummaryWriter()
+        cpu_count = mp.cpu_count()
         for iter in range(self.num_generations):
-            print("iter:", iter)
+            # print("iter:", iter)
             metropolis = self.sa.reduce()
             results = {}
-            pool = mp.Pool(10)
+            pool = mp.Pool(cpu_count)
             def callback(result):
                 key, value = result
                 results[key] = value
@@ -417,7 +418,7 @@ if __name__ == "__main__":
     # p = Parallel([2, 4, 3, 7, 4])
     # p.evolve()
     # env =
-    genix = Genix(num_generations=10)
+    genix = Genix(num_generations=50)
     genix.create_demes()
     genix.evolve()
     # genix.print_population()

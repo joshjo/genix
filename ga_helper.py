@@ -27,7 +27,7 @@ def normalize_rewards(rewards):
     return [
         (
             i[0],
-            ((i[1] * 0.85) / MAX_TOTAL_TIME) + ((i[2] * 0.15) / MAX_INDEX_SIZE),
+            ((i[1] * 0.7) / MAX_TOTAL_TIME) + ((i[2] * 0.3) / MAX_INDEX_SIZE),
         ) for i in rewards
     ]
 
