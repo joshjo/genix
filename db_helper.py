@@ -2,6 +2,9 @@ import os, errno
 import shutil
 import sqlite3
 import queries
+import time
+
+import local_cache
 
 
 BENCHMARK_QUERIES = [
@@ -28,35 +31,88 @@ BENCHMARK_QUERIES = [
     ("query 21", queries.query_21),
 ]
 
+TEST_QUERIES = [
+    ("query 1", queries.query_1),
+]
 
-def get_defs(db_name, plain=True):
-    file_db = sqlite3.connect(db_name)
+
+def get_defs(db_src, plain=True):
+    file_db = sqlite3.connect(db_src)
     query_all_tables = "SELECT name FROM sqlite_master WHERE type='table'"
     cursor = file_db.execute(query_all_tables)
     table_names = [row[0] for row in cursor.fetchall()]
-    # result = []
     result_dict = {}
     for table_name in table_names:
         query_columns = f"SELECT name FROM PRAGMA_TABLE_INFO('{table_name}');"
         cursor = file_db.execute(query_columns)
         result_dict[table_name] = [row[0] for row in cursor.fetchall()]
-        # result += [(table_name, row[0]) for row in cursor.fetchall()]
     file_db.close()
 
     return result_dict
 
 
-def copy_db(src, dst):
-    path_dst = f'/dev/shm/db_{dst}.db'
-    # path_dst = f'./replications/db_{dst}.db'
-    shutil.copyfile(src, path_dst)
+def copy_db(src, dest_path, dest_name):
+    dest_path = os.path.join(dest_path, dest_name)
+    os.mkdir(dest_path)
+    dest_file = os.path.join(dest_path, 'main.db')
+    shutil.copyfile(src, dest_file)
 
-    return path_dst
+    return dest_path, dest_file
 
 
-def silentremove(filename):
+def silentremove(filedir):
     try:
-        os.remove(filename)
+        shutil.rmtree(filedir)
     except OSError as e: # this would be "except OSError, e:" before Python 2.6
         if e.errno != errno.ENOENT: # errno.ENOENT = no such file or directory
             raise # re-raise exception if a different error occurred
+
+
+def get_index_size_query(phenotype):
+    names = ", ".join([f"'{x[0]}'" for x in phenotype])
+    query = f"select COALESCE(sum(pgsize), 0) from 'dbstat' where name IN ({names});"
+    return query
+
+
+def _get_hash_key(gen):
+    gen_str = "".join(str(i) for i in gen)
+    return gen_str
+
+
+def _run_index(elem, db_src, db_dest, benchmark_queries):
+    db_path, db_file = copy_db(db_src, db_dest, elem.process_id)
+    mem_db = sqlite3.connect(db_file)
+    cursor = mem_db.cursor()
+    phenotype = elem.get_phenotype()
+    create_index_queries = elem.get_phenotype_queries(phenotype)
+
+    for query in create_index_queries:
+        cursor.execute(query)
+
+    total_time = 0
+
+    index_size_query_query = get_index_size_query(phenotype)
+    pointer = cursor.execute(index_size_query_query)
+    qq = pointer.fetchone()
+    query_size = qq[0]
+    for _, query in benchmark_queries:
+        s = time.perf_counter()
+        cursor.executescript(query)
+        cursor.fetchone()
+        e = time.perf_counter()
+        query_time = e - s
+        total_time += query_time
+    mem_db.close()
+    silentremove(db_path)
+    return (total_time, query_size)
+
+
+def run_index(elem, db_src, db_dest, benchmark_queries):
+    key = _get_hash_key(elem.gen)
+    value = local_cache.get(key)
+    if value is None:
+        value = _run_index(elem, db_src, db_dest, benchmark_queries)
+        local_cache.set(key, value)
+    else:
+        value = tuple(value)
+    return value

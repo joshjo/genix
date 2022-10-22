@@ -1,12 +1,20 @@
 # Evoindexing
 
-A database indexing by using eovlutionary algorithms.
+A database indexing by using evolutionary algorithms.
 
 
 ## Install
 
+### Create Database Benchmark
 - Clone the repository: https://github.com/lovasoa/TPCH-sqlite
 - Generate a 0.1 version of TPC-H DB with: `SCALE_FACTOR=0.1 make`
+
+### Install dependencies
+- Install rocksDB v6 https://github.com/facebook/rocksdb/releases/tag/v6.29.3
+
+### Instal the project
+
+```pip install -r requirements.txt```
 
 
 ## Model
