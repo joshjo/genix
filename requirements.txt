@@ -3,4 +3,5 @@ numpy==1.22.3
 tensorboardX==2.5.1
 matplotlib==3.5.3
 python-dotenv==0.21.0
+python-rocksdb==0.7.0
 ipython
