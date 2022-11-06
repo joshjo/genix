@@ -1,16 +1,34 @@
+import hashlib
 import json
 from rocksdict import Rdict
 
 
-_cache = Rdict('dbs/cache.db')
+def hash_list(list_data):
+    """Return a hash from the given data"""
+    data = sorted(list_data)
+    return hashlib.sha1(json.dumps(data).encode("utf-8")).hexdigest()
 
 
-def put(key, value):
-    _cache[key] = value
+class LocalCache:
+    _caches = {}
+
+    def __new__(cls, benchmark_queries):
+        hash_name = hash_list(benchmark_queries)
+        if hash_name not in cls._caches:
+            new_cache = Rdict(f"dbs/cache/{hash_name}.db")
+            cls._caches[hash_name] = new_cache
+        return cls._caches[hash_name]
+
+    def __init__(self, benchmark_queries):
+        self._cache = self.__new__(benchmark_queries)
 
 
-def get(key):
-    try:
-        return _cache[key]
-    except:
-        return
+    def put(key, value):
+        self._cache[key] = value
+
+
+    def get(key):
+        try:
+            return self._cache[key]
+        except:
+            return

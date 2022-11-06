@@ -5,6 +5,7 @@ from dotenv import dotenv_values
 import abc
 import math
 import multiprocessing as mp
+import argparse
 from tensorboardX import SummaryWriter
 import uuid
 from db_helper import (
@@ -14,7 +15,13 @@ from db_helper import (
     run_index,
 )
 from ga_helper import evolve_deme
+from local_cache import LocalCache
 from plot_helper import plot_generation
+
+
+parser = argparse.ArgumentParser(description='GENIX runner.')
+parser.add_argument(
+    '--debug', default=False, action=argparse.BooleanOptionalAction)
 
 ACTIVE = 1
 NOINDEX = 0
@@ -27,8 +34,8 @@ BIDIRECTIONAL = 0
 LEFT_TO_RIGHT = 1
 RIGHT_TO_LEFT = 2
 
-ENV_VALUES = dotenv_values(".env")
-is_debug = ENV_VALUES.get("DEBUG", "False").lower() in ["true", "1"]
+# ENV_VALUES = dotenv_values(".env")
+# is_debug = ENV_VALUES.get("DEBUG", "False").lower() in ["true", "1"]
 
 
 # The relation is based is on who received the connection
@@ -238,6 +245,7 @@ class Genix:
         self.migration_policy = migration_policy
         self.fitness_weights = fitness_weights
         self._create_demes()
+        self._cache = LocalCache(benchmark_queries)
 
     def _create_demes(self):
         pos = 0
@@ -290,6 +298,7 @@ class Genix:
         cpu_count = mp.cpu_count()
         runner_options = self.db_settings
         runner_options["benchmark_queries"] = self.benchmark_queries
+        runner_options["cache"] = self._cache
         for iter in range(num_generations):
             metropolis = sa.reduce()
             new_population = {}
@@ -343,21 +352,22 @@ def error_callback(exception):
 
 
 if __name__ == "__main__":
-    print("is_debug", is_debug)
-    num_generations = 1 if is_debug else 50
+
+    args = parser.parse_args()
+    is_debug = args.debug
+
+    num_generations = 1 if is_debug else 3
     benchmark_queries = BENCHMARK_QUERIES
     if is_debug:
         benchmark_queries = TEST_QUERIES
     genix = Genix(
         is_multiobjective=False,
-        # run_parallel=True,
-        run_parallel=False,
         benchmark_queries=benchmark_queries,
         db_settings={
             "db_src": "dbs/TPC-H-small.db",
             "db_dest": "./replications" if is_debug else "/dev/shm",
         },
         fitness_weights=[0.7, 0.3],
-        # run_parallel=not is_debug,
+        run_parallel=not is_debug,
     )
     genix.evolve(num_generations=num_generations)

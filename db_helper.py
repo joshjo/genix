@@ -4,8 +4,6 @@ import sqlite3
 import queries
 import time
 
-import local_cache
-
 
 BENCHMARK_QUERIES = [
     ("query 1", queries.query_1),
@@ -107,12 +105,13 @@ def _run_index(elem, db_src, db_dest, benchmark_queries):
     return (total_time, query_size)
 
 
-def run_index(elem, db_src, db_dest, benchmark_queries):
+def run_index(elem, db_src, db_dest, benchmark_queries, cache=None):
     key = _get_hash_key(elem.gen)
-    value = local_cache.get(key)
+    value = cache.get(key)
     if value is None:
         value = _run_index(elem, db_src, db_dest, benchmark_queries)
-        local_cache.put(key, value)
+        cache.put(key, value)
     else:
+        print("getting from cache", key, value)
         value = tuple(value)
     return value
