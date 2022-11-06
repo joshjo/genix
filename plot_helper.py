@@ -64,7 +64,6 @@ def _write_queries(writer, map_demes, name, iter):
             data_values["index_query"].append(__("".join(elem.get_phenotype_queries())))
             data_values["elite"].append(__("true" if elem.is_elite else "else"))
 
-    import ipdb; ipdb.set_trace()
     df = pd.DataFrame(data=data_values)
     df = df.set_index('pid')
     writer.add_text(f"best-elem/{name}", df.to_markdown(), iter)

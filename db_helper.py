@@ -112,7 +112,7 @@ def run_index(elem, db_src, db_dest, benchmark_queries):
     value = local_cache.get(key)
     if value is None:
         value = _run_index(elem, db_src, db_dest, benchmark_queries)
-        local_cache.set(key, value)
+        local_cache.put(key, value)
     else:
         value = tuple(value)
     return value

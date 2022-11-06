@@ -1,16 +1,16 @@
 import json
-import rocksdb
+from rocksdict import Rdict
 
 
-_cache = rocksdb.DB('dbs/cache.db', rocksdb.Options(create_if_missing=True))
+_cache = Rdict('dbs/cache.db')
 
 
-def set(key, value):
-    _cache.put(str.encode(key), json.dumps(value).encode())
+def put(key, value):
+    _cache[key] = value
 
 
 def get(key):
-    value = _cache.get(str.encode(key))
-    if not value:
+    try:
+        return _cache[key]
+    except:
         return
-    return json.loads(value)

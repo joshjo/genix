@@ -10,7 +10,7 @@ A database indexing by using evolutionary algorithms.
 - Generate a 0.1 version of TPC-H DB with: `SCALE_FACTOR=0.1 make`
 
 ### Install dependencies
-- Install rocksDB v6 https://github.com/facebook/rocksdb/releases/tag/v6.29.3
+- Install rocksDB version 7
 
 ### Instal the project
 
