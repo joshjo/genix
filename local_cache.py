@@ -9,26 +9,30 @@ def hash_list(list_data):
     return hashlib.sha1(json.dumps(data).encode("utf-8")).hexdigest()
 
 
+def get_hash_key(gen):
+    gen_str = "".join(str(i) for i in gen)
+    return gen_str
+
+
 class LocalCache:
     _caches = {}
 
-    def __new__(cls, benchmark_queries):
-        hash_name = hash_list(benchmark_queries)
-        if hash_name not in cls._caches:
-            new_cache = Rdict(f"dbs/cache/{hash_name}.db")
-            cls._caches[hash_name] = new_cache
-        return cls._caches[hash_name]
-
     def __init__(self, benchmark_queries):
-        self._cache = self.__new__(benchmark_queries)
+        hash_name = hash_list(benchmark_queries)
+        self._cache = Rdict(f"dbs/cache/{hash_name}.db")
 
-
-    def put(key, value):
+    def put(self, key, value):
         self._cache[key] = value
 
-
-    def get(key):
+    def get(self, key):
         try:
             return self._cache[key]
         except:
             return
+
+    def get_all(self):
+        return dict(self._cache)
+
+    def batch_update(self, new_values):
+        for key, value in new_values.items():
+            self._cache[key] = value

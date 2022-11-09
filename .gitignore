@@ -160,3 +160,5 @@ dbs/
 replications/
 temp_runs/
 local_cache.db
+
+.DS_Store

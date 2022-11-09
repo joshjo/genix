@@ -3,6 +3,7 @@ import shutil
 import sqlite3
 import queries
 import time
+from local_cache import get_hash_key
 
 
 BENCHMARK_QUERIES = [
@@ -71,12 +72,6 @@ def get_index_size_query(phenotype):
     query = f"select COALESCE(sum(pgsize), 0) from 'dbstat' where name IN ({names});"
     return query
 
-
-def _get_hash_key(gen):
-    gen_str = "".join(str(i) for i in gen)
-    return gen_str
-
-
 def _run_index(elem, db_src, db_dest, benchmark_queries):
     db_path, db_file = copy_db(db_src, db_dest, elem.process_id)
     mem_db = sqlite3.connect(db_file)
@@ -105,13 +100,11 @@ def _run_index(elem, db_src, db_dest, benchmark_queries):
     return (total_time, query_size)
 
 
-def run_index(elem, db_src, db_dest, benchmark_queries, cache=None):
-    key = _get_hash_key(elem.gen)
+def run_index(elem, db_src, db_dest, benchmark_queries, cache):
+    key = get_hash_key(elem.gen)
     value = cache.get(key)
     if value is None:
         value = _run_index(elem, db_src, db_dest, benchmark_queries)
-        cache.put(key, value)
     else:
-        print("getting from cache", key, value)
         value = tuple(value)
     return value

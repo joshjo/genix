@@ -15,7 +15,7 @@ from db_helper import (
     run_index,
 )
 from ga_helper import evolve_deme
-from local_cache import LocalCache
+from local_cache import LocalCache, get_hash_key
 from plot_helper import plot_generation
 
 
@@ -298,7 +298,7 @@ class Genix:
         cpu_count = mp.cpu_count()
         runner_options = self.db_settings
         runner_options["benchmark_queries"] = self.benchmark_queries
-        runner_options["cache"] = self._cache
+        runner_options["cache"] = self._cache.get_all()
         for iter in range(num_generations):
             metropolis = sa.reduce()
             new_population = {}
@@ -338,6 +338,15 @@ class Genix:
                 self.demes[deme].population = population
 
             self._migrate()
+
+            # Cache fitness
+            all_items = {}
+            for _, population in new_population.items():
+                for elem in population:
+                    all_items[get_hash_key(elem.gen)] = elem._fitness
+
+            self._cache.batch_update(all_items)
+
             plot_generation(
                 writer,
                 self.demes,
@@ -356,7 +365,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     is_debug = args.debug
 
-    num_generations = 1 if is_debug else 3
+    num_generations = 2 if is_debug else 50
     benchmark_queries = BENCHMARK_QUERIES
     if is_debug:
         benchmark_queries = TEST_QUERIES
