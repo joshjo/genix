@@ -19,10 +19,6 @@ from local_cache import LocalCache, get_hash_key
 from plot_helper import plot_generation
 
 
-parser = argparse.ArgumentParser(description='GENIX runner.')
-parser.add_argument(
-    '--debug', default=False, action=argparse.BooleanOptionalAction)
-
 ACTIVE = 1
 NOINDEX = 0
 
@@ -58,7 +54,9 @@ def get_log_dir(main_folder, comment):
     from datetime import datetime
     current_time = datetime.now().strftime('%b%d_%H-%M-%S')
     return os.path.join(
-        main_folder, current_time + '_' + socket.gethostname() + comment)
+        main_folder, 
+        "_".join(current_time, socket.gethostname(), comment),
+    )
 
 
 class BaseGen(abc.ABC):
@@ -236,6 +234,7 @@ class Genix:
             migration_policy=BIDIRECTIONAL,
             db_settings={},
             fitness_weights=[],
+            logdir="",
         ):
         self.demes = {}
         self.db_settings = db_settings
@@ -245,6 +244,7 @@ class Genix:
         self.migration_policy = migration_policy
         self.fitness_weights = fitness_weights
         self._create_demes()
+        self.logdir = logdir
         self._cache = LocalCache(benchmark_queries)
 
     def _create_demes(self):
@@ -291,9 +291,7 @@ class Genix:
         sa = SA(num_generations, 0)
         str_weights = "__".join([str(x) for x in self.fitness_weights])
         str_mode = "multi" if self.is_multiobjective else "single"
-        logdir = get_log_dir(
-            "temp_runs/" if is_debug else "runs/",
-            f"{str_mode}__{str_weights}")
+        logdir = get_log_dir(self.logdir, f"{str_mode}__{str_weights}")
         writer = SummaryWriter(logdir=logdir)
         cpu_count = mp.cpu_count()
         runner_options = self.db_settings
@@ -360,23 +358,63 @@ def error_callback(exception):
     print("(mp)", exception)
 
 
+def get_queries(args):
+    if args.allqueries:
+        return BENCHMARK_QUERIES
+    return [BENCHMARK_QUERIES[i] for i in args.queries]
+
+
+parser = argparse.ArgumentParser(description='GENIX runner.')
+parser.add_argument(
+    "-n", "--generations", default=10, type=int, metavar="N"
+)
+parser.add_argument(
+    "-a", "--allqueries", default=False, action=argparse.BooleanOptionalAction, 
+)
+parser.add_argument(
+    "-q", "--queries", metavar="N", type=int, nargs="+",
+)
+parser.add_argument(
+    "--db_src", type=str, required=True,
+)
+parser.add_argument(
+    "--db_dest", type=str, required=True,
+)
+parser.add_argument(
+    "--logdir", type=str, required=True,
+)
+parser.add_argument(
+    "--fitness_weights", type=float, nargs=2, default=[0.7, 0.3]
+)
+parser.add_argument(
+    "--run_parallel", default=False, action=argparse.BooleanOptionalAction,
+)
+parser.add_argument(
+    "--multiobjective", default=False, action=argparse.BooleanOptionalAction,
+)
+
+
 if __name__ == "__main__":
-
     args = parser.parse_args()
-    is_debug = args.debug
+    if not args.queries and not args.allqueries:
+        parser.error("Either --queries or --allqueries is required")
 
-    num_generations = 2 if is_debug else 50
-    benchmark_queries = BENCHMARK_QUERIES
-    if is_debug:
-        benchmark_queries = TEST_QUERIES
+    # num_generations = 2 if is_debug else 2
+    benchmark_queries = get_queries(args)
+    # if is_debug:
+    #     benchmark_queries = TEST_QUERIES
     genix = Genix(
-        is_multiobjective=False,
+        is_multiobjective=args.multiobjective,
         benchmark_queries=benchmark_queries,
         db_settings={
-            "db_src": "dbs/TPC-H-small.db",
-            "db_dest": "./replications" if is_debug else "/dev/shm",
+            # "db_src": "dbs/TPC-H-small.db",
+            # "db_dest": "./replications" if is_debug else "/dev/shm",
+            "db_src": args.db_src,
+            "db_dest": args.db_dest,
         },
-        fitness_weights=[0.7, 0.3],
-        run_parallel=not is_debug,
+        fitness_weights=args.fitness_weights,
+        run_parallel=args.run_parallel,
+        logdir=args.logdir,
     )
-    genix.evolve(num_generations=num_generations)
+    genix.evolve(num_generations=args.generations)
+
