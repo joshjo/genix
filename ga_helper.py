@@ -74,7 +74,7 @@ def set_elitism_single_objective(population):
         elem.is_elite = i < top_n
 
 
-def evolve_deme(deme, is_multi_objective, runner, metropolis, options={}):
+def evolve_deme(deme, is_multi_objective, runner, metropolis, options={}, op_probs={}):
     """
     population: List of BaseGen.
     """
@@ -101,18 +101,20 @@ def evolve_deme(deme, is_multi_objective, runner, metropolis, options={}):
     for elem in new_population:
         if elem.is_elite and not random() < metropolis:
             continue
-        if random() < 0.3:
+        prob_mutation = op_probs.get("mutation")
+        prob_crossing = op_probs.get("crossing")
+        prob_migration = op_probs.get("migration")
+        if random() < prob_mutation:
             elem.mutate()
-        if random() < 0.7:
+        if random() < prob_crossing:
             rindex = randint(0, len_population - 1)
             elem.crossover(
                 new_population[rindex],
                 partial=new_population[rindex].is_elite,
             )
-        if random() < 0.1 and deme.immigrants:
+        if random() < prob_migration and deme.immigrants:
             rindex = randint(0, len(deme.immigrants) - 1)
             elem.extend(deme.immigrants[rindex].elem)
-
 
     for elem in new_population:
         elem._fitness = runner(elem=elem, **options)

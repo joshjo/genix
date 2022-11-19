@@ -42,7 +42,7 @@ def test_plot(points):
     plt.show()
 
 
-def _write_queries(writer, map_demes, name, iter):
+def _write_queries(writer, map_demes, name, iter, flat=False):
     data_values = {
         "deme": [],
         "pid": [],
@@ -54,7 +54,12 @@ def _write_queries(writer, map_demes, name, iter):
         "elite": [],
     }
     for deme_name, deme in map_demes.items():
-        for elem in deme.population:
+        population = []
+        if flat:
+            population = deme
+        else:
+            population = deme.population
+        for elem in population:
             data_values["pid"].append(elem.process_id)
             data_values["deme"].append(deme_name)
             data_values["gen"].append(__(elem.get_gen_str()))
@@ -62,11 +67,11 @@ def _write_queries(writer, map_demes, name, iter):
             data_values["time"].append(round(elem._fitness[0], 4))
             data_values["space"].append(round(elem._fitness[1], 4))
             data_values["index_query"].append(__("".join(elem.get_phenotype_queries())))
-            data_values["elite"].append(__("true" if elem.is_elite else "else"))
+            data_values["elite"].append(__("true" if elem.is_elite else "false"))
 
     df = pd.DataFrame(data=data_values)
     df = df.set_index('pid')
-    writer.add_text(f"best-elem/{name}", df.to_markdown(), iter)
+    writer.add_text(f"queries/{name}", df.to_markdown(), iter)
 
 
 def _write_scalar(writer, deme, iter, mode="offline"):
@@ -88,12 +93,12 @@ def _write_scalar(writer, deme, iter, mode="offline"):
 
 def _write_fitness_points(writer, population, name, iter, is_multiobjective):
     elites = [elem for elem in population if elem.is_elite]
-    fig = get_population_fig(
-        population,
-        elites,
-        draw_pareto=is_multiobjective,
-    )
-    writer.add_figure(f"non-dominants/{name}", fig, iter)
+    # fig = get_population_fig(
+    #     population,
+    #     elites,
+    #     draw_pareto=is_multiobjective,
+    # )
+    # writer.add_figure(f"non-dominants/{name}", fig, iter)
 
     return elites
 
@@ -126,7 +131,9 @@ def plot_generation(writer, demes, iter, flat_defs, is_multiobjective):
     all_offline = 0
     # all_non_dominants = {}
     elites = []
+    map_elites = {}
     for deme in demes.values():
+        deme_elites = []
         online = _write_scalar(writer, deme, iter, mode="online")
         offline = _write_scalar(writer, deme, iter, mode="offline")
         all_online += online
@@ -136,7 +143,10 @@ def plot_generation(writer, demes, iter, flat_defs, is_multiobjective):
         )
         # all_non_dominants[deme.name] = non_dominants
         for elem in non_dominants:
-            elites.append(deepcopy(elem))
+            new_elem = deepcopy(elem)
+            deme_elites.append(new_elem)
+        elites += deme_elites
+        map_elites[deme.name] = deme_elites
     len_demes = len(demes.values())
     _write_queries(writer, demes, "all", iter)
     writer.add_scalar(f"online/all", all_online / len_demes, iter)
@@ -150,3 +160,4 @@ def plot_generation(writer, demes, iter, flat_defs, is_multiobjective):
     _write_fitness_points(
         writer, elites, "all", iter, is_multiobjective=is_multiobjective
     )
+    _write_queries(writer, map_elites, "elites", iter, flat=True)

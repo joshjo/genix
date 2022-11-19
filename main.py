@@ -1,7 +1,6 @@
 from collections import defaultdict, namedtuple
 from copy import deepcopy
 from random import random, randint
-from dotenv import dotenv_values
 import abc
 import math
 import multiprocessing as mp
@@ -10,7 +9,6 @@ from tensorboardX import SummaryWriter
 import uuid
 from db_helper import (
     BENCHMARK_QUERIES,
-    TEST_QUERIES,
     get_defs,
     run_index,
 )
@@ -26,12 +24,9 @@ MAX_TOTAL_TIME = 100
 MAX_INDEX_SIZE = 100_000_000
 FITNESS_LIMTIS = [MAX_TOTAL_TIME, MAX_INDEX_SIZE]
 
-BIDIRECTIONAL = 0
-LEFT_TO_RIGHT = 1
-RIGHT_TO_LEFT = 2
-
-# ENV_VALUES = dotenv_values(".env")
-# is_debug = ENV_VALUES.get("DEBUG", "False").lower() in ["true", "1"]
+BIDIRECTIONAL = "bidirectional"
+LEFT_TO_RIGHT = "left_to_right"
+RIGHT_TO_LEFT = "right_to_left"
 
 
 # The relation is based is on who received the connection
@@ -55,7 +50,7 @@ def get_log_dir(main_folder, comment):
     current_time = datetime.now().strftime('%b%d_%H-%M-%S')
     return os.path.join(
         main_folder, 
-        "_".join(current_time, socket.gethostname(), comment),
+        "_".join([current_time, socket.gethostname(), comment]),
     )
 
 
@@ -211,7 +206,10 @@ class Deme:
         for elem in source_deme.population:
             bool_op = all if only_elites else any
             if bool_op([random() < ratio, elem.is_elite]):
-                self.immigrants.append(Immigrant(deepcopy(elem), source_deme.name))
+                new_elem = deepcopy(elem)
+                new_elem.assign_process_id()
+                self.immigrants.append(Immigrant(new_elem, source_deme.name))
+
 
 class SA:
     def __init__(self, total_iterations, temp):
@@ -232,8 +230,10 @@ class Genix:
             run_parallel=True,
             benchmark_queries=[],
             migration_policy=BIDIRECTIONAL,
+            migration_ratio=0.1,
             db_settings={},
             fitness_weights=[],
+            op_probs={},
             logdir="",
         ):
         self.demes = {}
@@ -242,10 +242,12 @@ class Genix:
         self.is_multiobjective = is_multiobjective
         self.run_parallel = run_parallel
         self.migration_policy = migration_policy
+        self.migration_ratio = migration_ratio
         self.fitness_weights = fitness_weights
         self._create_demes()
         self.logdir = logdir
         self._cache = LocalCache(benchmark_queries)
+        self.op_probs = op_probs
 
     def _create_demes(self):
         pos = 0
@@ -277,9 +279,9 @@ class Genix:
                 deme_a = self.demes[name_from]
                 deme_b = self.demes[name_to]
                 if self.migration_policy in [LEFT_TO_RIGHT, BIDIRECTIONAL]:
-                    deme_a.immigrate(deme_b, only_elites=False, ratio=0.05)
+                    deme_a.immigrate(deme_b, only_elites=False, ratio=self.migration_ratio)
                 if self.migration_policy in [RIGHT_TO_LEFT, BIDIRECTIONAL]:
-                    deme_b.immigrate(deme_a, only_elites=False, ratio=0.05)
+                    deme_b.immigrate(deme_a, only_elites=False, ratio=self.migration_ratio)
 
     def _plot_results(self, results, writer, iter):
         if self.use_pareto:
@@ -291,7 +293,15 @@ class Genix:
         sa = SA(num_generations, 0)
         str_weights = "__".join([str(x) for x in self.fitness_weights])
         str_mode = "multi" if self.is_multiobjective else "single"
-        logdir = get_log_dir(self.logdir, f"{str_mode}__{str_weights}")
+        metadesc = [
+            f"mode_{str_mode}",
+            f"w_{str_weights}",
+            f"mr_{self.migration_ratio}",
+            f"mp_{self.migration_policy}",
+            f"gen_{num_generations}",
+            "_".join([f"{k[:4]}_{v}" for k, v in self.op_probs.items()])
+        ]
+        logdir = get_log_dir(self.logdir, "__".join(metadesc))
         writer = SummaryWriter(logdir=logdir)
         cpu_count = mp.cpu_count()
         runner_options = self.db_settings
@@ -314,6 +324,7 @@ class Genix:
                             run_index,
                             metropolis,
                             runner_options,
+                            self.op_probs,
                         ),
                         callback=callback,
                         error_callback=error_callback,
@@ -328,6 +339,7 @@ class Genix:
                         run_index,
                         metropolis,
                         runner_options,
+                        self.op_probs,
                     )
                     new_population[key] = value
 
@@ -387,11 +399,23 @@ parser.add_argument(
     "--fitness_weights", type=float, nargs=2, default=[0.7, 0.3]
 )
 parser.add_argument(
+    "--migration_ratio", type=float, required=True,
+)
+parser.add_argument(
+    "--migration_policy", 
+    type=str, 
+    choices=["bidirectional", "left_to_right", "right_to_left"],
+    required=True,
+)
+parser.add_argument(
     "--run_parallel", default=False, action=argparse.BooleanOptionalAction,
 )
 parser.add_argument(
     "--multiobjective", default=False, action=argparse.BooleanOptionalAction,
 )
+parser.add_argument("--opcrossing", type=float, default=0.7)
+parser.add_argument("--opmutation", type=float, default=0.3)
+parser.add_argument("--opmigration", type=float, default=0.1)
 
 
 if __name__ == "__main__":
@@ -415,6 +439,12 @@ if __name__ == "__main__":
         fitness_weights=args.fitness_weights,
         run_parallel=args.run_parallel,
         logdir=args.logdir,
+        migration_ratio=args.migration_ratio,
+        op_probs={
+            "crossing": args.opcrossing,
+            "mutation": args.opmutation,
+            "migration": args.opmigration,
+        }
     )
     genix.evolve(num_generations=args.generations)
 

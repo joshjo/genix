@@ -72,6 +72,7 @@ def get_index_size_query(phenotype):
     query = f"select COALESCE(sum(pgsize), 0) from 'dbstat' where name IN ({names});"
     return query
 
+
 def _run_index(elem, db_src, db_dest, benchmark_queries):
     db_path, db_file = copy_db(db_src, db_dest, elem.process_id)
     mem_db = sqlite3.connect(db_file)
