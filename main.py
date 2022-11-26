@@ -289,8 +289,8 @@ class Genix:
         else:
             self._plot_results_aggregation(results, writer, iter)
 
-    def evolve(self, num_generations):
-        sa = SA(num_generations, 0)
+    def evolve(self, num_generations, initial_sa=0):
+        sa = SA(num_generations, initial_sa)
         str_weights = "__".join([str(x) for x in self.fitness_weights])
         str_mode = "multi" if self.is_multiobjective else "single"
         metadesc = [
@@ -299,6 +299,7 @@ class Genix:
             f"mr_{self.migration_ratio}",
             f"mp_{self.migration_policy}",
             f"gen_{num_generations}",
+            f"metro_{initial_sa}"
             "_".join([f"{k[:4]}_{v}" for k, v in self.op_probs.items()])
         ]
         logdir = get_log_dir(self.logdir, "__".join(metadesc))
@@ -416,6 +417,7 @@ parser.add_argument(
 parser.add_argument("--opcrossing", type=float, default=0.7)
 parser.add_argument("--opmutation", type=float, default=0.3)
 parser.add_argument("--opmigration", type=float, default=0.1)
+parser.add_argument("--initial_sa", type=float, default=0.0)
 
 
 if __name__ == "__main__":
@@ -446,5 +448,7 @@ if __name__ == "__main__":
             "migration": args.opmigration,
         }
     )
-    genix.evolve(num_generations=args.generations)
-
+    genix.evolve(
+        num_generations=args.generations,
+        initial_sa=args.initial_sa,
+    )
