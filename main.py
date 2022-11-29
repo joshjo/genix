@@ -299,8 +299,8 @@ class Genix:
             f"mr_{self.migration_ratio}",
             f"mp_{self.migration_policy}",
             f"gen_{num_generations}",
-            f"metro_{initial_sa}"
-            "_".join([f"{k[:4]}_{v}" for k, v in self.op_probs.items()])
+            "_".join([f"{k[:4]}_{v}" for k, v in self.op_probs.items()]),
+            f"metro_{initial_sa}",
         ]
         logdir = get_log_dir(self.logdir, "__".join(metadesc))
         writer = SummaryWriter(logdir=logdir)
@@ -439,6 +439,7 @@ if __name__ == "__main__":
             "db_dest": args.db_dest,
         },
         fitness_weights=args.fitness_weights,
+        migration_policy=args.migration_policy,
         run_parallel=args.run_parallel,
         logdir=args.logdir,
         migration_ratio=args.migration_ratio,
