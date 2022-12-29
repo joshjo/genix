@@ -93,12 +93,12 @@ def _write_scalar(writer, deme, iter, mode="offline"):
 
 def _write_fitness_points(writer, population, name, iter, is_multiobjective):
     elites = [elem for elem in population if elem.is_elite]
-    # fig = get_population_fig(
-    #     population,
-    #     elites,
-    #     draw_pareto=is_multiobjective,
-    # )
-    # writer.add_figure(f"non-dominants/{name}", fig, iter)
+    fig = get_population_fig(
+        population,
+        elites,
+        draw_pareto=is_multiobjective,
+    )
+    writer.add_figure(f"non-dominants/{name}", fig, iter)
 
     return elites
 
